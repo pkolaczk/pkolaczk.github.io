@@ -32,8 +32,8 @@ external:                    # see http://fontawesome.com/icons
 
 comments:
   disqus: true
-  disqus_shortname: piotr_kolaczkowski       # see https://disqus.com/
-#  isso_domain: ""                           # see https://posativ.org/isso/
+  disqus_shortname: pkolaczk        # see https://disqus.com/
+#  isso_domain: ""                  # see https://posativ.org/isso/
 
 plugins: 
   - jekyll-feed
