@@ -31,8 +31,9 @@ external:                    # see http://fontawesome.com/icons
   - {title: RSS, icon: rss, url: "/feed.xml"}
 
 comments:
-#  disqus_shortname: ""      # see https://disqus.com/
-#  isso_domain: ""           # see https://posativ.org/isso/
+  disqus: true
+  disqus_shortname: pkolaczk        # see https://disqus.com/
+#  isso_domain: ""                  # see https://posativ.org/isso/
 
 plugins: 
   - jekyll-feed

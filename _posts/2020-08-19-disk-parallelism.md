@@ -1,38 +1,9 @@
 ---
 layout: post
 title: Performance Impact of Parallel Disk Access
+comments: true
 excerpt_separator: <!--more-->
 ---
-
-<script>
-function makeBarChart(id, labels, data) {
-    var ctx = document.getElementById(id).getContext('2d');
-    new Chart(ctx, {
-        type: 'horizontalBar',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'time [s]',
-                backgroundColor: "rgba(230,140,35,0.8)",        
-                barPercentage: 0.6,
-                data: data,
-            }]
-        },
-        options: {
-            maintainAspectRatio: false,
-            legend: { display: false },
-            scales: {
-                xAxes: [{
-                    ticks: {
-                        beginAtZero: true
-                    }
-                }]
-            }
-        }
-    });
-}    
-</script>
-
 
 One of the well-known ways of speeding up a data processing task is partitioning the data into smaller
 chunks and processing the chunks in parallel. Let's assume we can partition the task easily, or the input data is already 
@@ -42,7 +13,55 @@ Can we lose any?
 
 <!--more-->
 
-# SSD
+<script>
+var colors = ["rgba(230,140,35,0.8)", "rgba(130,20,0,0.8)"]
+
+function makeBarChart(id, labels, data) {    
+    var ctx = document.getElementById(id).getContext('2d');
+    var datasets = [];
+    var colorIndex = 0;
+    for (var series in data) {        
+        datasets.push({
+            label: series,
+            backgroundColor: colors[colorIndex],        
+            barPercentage: 0.6,
+            data: data[series],
+        });
+        colorIndex++;
+    }
+
+    new Chart(ctx, {
+        type: 'horizontalBar',
+        data: {
+            labels: labels,
+            datasets: datasets,
+        },
+        options: {
+            maintainAspectRatio: false,
+            legend: { display: Object.keys(data).length  > 1 },
+            scales: {
+                yAxes: [{
+                    scaleLabel: { 
+                        display: true,
+                        labelString: "# threads",
+                    },
+                }],
+                xAxes: [{
+                    scaleLabel: { 
+                        display: true,
+                        labelString: "time [s]",
+                    },
+                    ticks: {
+                        beginAtZero: true
+                    }
+                }]
+            }    
+        }
+    });
+}    
+</script>
+
+# SSD – Metadata and Random Reads
 
 When I started working on [fclones](https://github.com/pkolaczk/fclones) duplicate file finder,
 I wanted to make it as fast as possible by leveraging capabilities of modern hardware. 
@@ -53,7 +72,7 @@ a few useful conclusions about I/O performance on SSD.
 
 The most time-consuming part of the job is actually reading
 the data from disk into memory in order to compute hashes. The number of files is typically large (thousands or even millions) 
-and the problem of computing their hashes is embarassingly parallel. Scheduling work on multiple threads seemed like the right move. 
+and the problem of computing their hashes is embarrassingly parallel. Scheduling work on multiple threads seemed like the right move. 
 Before writing the whole code, I did a few quick checks with scanning directory tree and fetching file metadata, and, as expected, the performance
 gains from multithreading were huge, which is illustrated in Fig. 1.
 
@@ -62,9 +81,9 @@ gains from multithreading were huge, which is illustrated in Fig. 1.
     <script>
     makeBarChart("scanPerfSsd", 
         [1, 2, 4, 8, 16, 32],
-        [40.38, 19.18, 9.85, 5.74, 4.155, 3.64]);
+        {"time": [40.38, 19.18, 9.85, 5.74, 4.155, 3.64]});
     </script>
-    <span class="caption"> Fig.1: Time to fetch metadata of ~1.5 million file entries on an SSD in function of number of threads</span>
+    <span class="caption"> Fig.1: Time to fetch metadata of ~1.5 million file entries on an SSD</span>
 </div>
 
 In the next stage, the files matching by size are compared by hashes of their initial 4 kB block. This involves a lot of random I/O – 
@@ -79,9 +98,9 @@ the SSD busy.
     <script>
     makeBarChart("prefixHashPerfSsd", 
         [1, 2, 4, 8, 16, 32, 64], 
-        [198, 88.5, 40.1, 23.0, 10.75, 6.69, 5.43]);
+        {"time": [198, 88.5, 40.1, 23.0, 10.75, 6.69, 5.43]});
     </script>
-    <span class="caption"> Fig.2: Time to hash initial blocks of ~1.2 million files on an SSD in function of number of threads</span>
+    <span class="caption"> Fig.2: Time to hash initial blocks of ~1.2 million files on an SSD</span>
 </div>
 
 Let's look at `iostat`. With only 1 thread, `iostat` reports CPU to be mostly idle, but
@@ -109,7 +128,7 @@ Device            r/s     rMB/s   rrqm/s  %rrqm r_await rareq-sz   aqu-sz  %util
 nvme0n1     223974,00    874,90     0,00   0,00    0,17     4,00     0,00 100,00
 </pre>
 
-BTW: why the average queue size `aqu-sz` remains 0,00 even uder 64 threads remain a mystery to me. 
+BTW: why the average queue size `aqu-sz` remains 0,00 even under 64 threads remain a mystery to me. 
 Feel free to drop any clues in the comments.
 
 How do I known the CPU is not the main bottleneck here then? The CPU load numbers given by `iostat` are pretty high, aren't they?
@@ -118,9 +137,13 @@ When all cached, the metadata scanning took 1.5 s and the partial hashing took 1
 significantly faster than when physical reads were involved, so nope, 
 I/O is still the major bottleneck, even with 64 threads. 
 
+# SSD – Sequential Reads
+
 And what about the sequential I/O reads? Does parallelizing the sequential I/O improve speed as well?
-It looks like it does, although not by as much as for random I/O (Fig. 3).
-Gains seem to hit a plateau a bit earlier – after 8 threads. In this case the operating system has an opportunity to prefetch data, so
+It looks like it does, although not by as much as for random I/O (Fig.&nbsp;3).
+The last stage of `fclones` algorithm is hashing full files – in this experiment the files were mostly JPG and RAW images, 
+about 10 MB large on average. Gains seem to hit a plateau a bit earlier – after 8 threads. In this case the operating 
+system has an opportunity to prefetch data, so
 it can keep the SSD busy even when my application is not asking for data for a while. 
 
 <div class="figure">
@@ -128,23 +151,81 @@ it can keep the SSD busy even when my application is not asking for data for a w
     <script>
     makeBarChart("fullHashPerfSsd", 
             [1, 2, 4, 8, 16, 32, 64],
-            [74.3, 33.74, 20.1, 16.75, 15.45, 15.20, 15.15]);
+            {"time": [74.3, 33.74, 20.1, 16.75, 15.45, 15.20, 15.15]});
     </script>
-    <span class="caption"> Fig.3: Time to hash 21.6 GB of data read from an SSD in function of number of threads</span>
+    <span class="caption"> Fig. 3: Time to hash 21.6 GB of data read from an SSD in function of number of threads</span>
 </div>
 
-# HDD
+# HDD – Random Reads
+Contrary to an SSD, a spinning drive has a large seek-latency and it can serve I/O requests
+at much lower rate. Hence, we can definitely expect random I/O to be much slower on an HDD than on an SSD. 
+But can we expect any performance gains from reading in parallel? 
+My initial thought was there shouldn't be any visible gains, because a single HDD can only serve 
+a single read request at a given time, then it has to reposition the heads to "jump" to another file, and 
+this looks very "sequentially" in principle. Having a large number of requests piled up in the queue 
+shouldn't change anything: the HDD would handle them in a sequence anyways. 
+An HDD is also slow enough that even a single fast thread should keep it fully busy with at 
+least one request ready to serve at any time.
+
+I was wrong. It turns out that for small, random I/O requests there are noticeable gains from parallelism 
+even on an HDD (Fig. 4). But this happens for a different reason than on SSD. 
+The seek latency depends heavily on the *order* of the I/O requests. If the process submits more
+I/O requests from multiple threads, the operating system can *reorder* them by physical data location, thus minimizing
+the distance the HDD heads have to travel.
+
+<div class="figure">
+    <div style="height:14em"><canvas id="partialHashPerfHdd"></canvas></div>
+    <script>
+    makeBarChart("partialHashPerfHdd", 
+            [1, 2, 4, 8, 16, 64, 256],
+            {"time": [681.92, 358.34, 316.53, 276.68, 245.06, 225.99, 227.40]});
+    </script>
+    <span class="caption"> Fig.4: Time to hash initial blocks of 46,165 files on a 7200 RPM HDD</span>
+</div>
+
+# HDD – Sequential Reads
+Unfortunately, when reading larger chunks of data sequentially, using multi-threding actually hurts the throughput (Fig.&nbsp;5).
+This is because the operating system interleaves the I/O requests coming from different threads and the HDD would have
+to reposition the heads frequently jumping from one file to another. How much throughput is lost depends heavily on the operating
+system and its configuration, but generally I'd expect this to be a factor 2x-10x.
+
+<div class="figure">
+    <div style="height:18em"><canvas id="fullHashPerfHdd"></canvas></div>
+    <script>
+    makeBarChart("fullHashPerfHdd", 
+            [1, 2, 4, 8, 16, 64], 
+            {"fadvise": [24.131, 54.59, 48.44, 45.114, 42.54, 42.102], 
+             "no fadvise": [24.193, 67.835, 51.237, 53.45, 53.99, 52.24]});
+    </script>
+    <span class="caption"> Fig.5: Time to hash 1.7 GB of data on a 7200 RPM HDD</span>
+</div>
+
+One way of solving this problem in an application is to not allow many threads to contend for the same HDD device at the OS level, and 
+instead make the application take some control over the I/O request scheduling by itself.
+You can use a dedicated single thread to handle all I/O to a single spinning drive (this is what `fclones` does since version 0.7.0),
+or guard I/O operations by a critical section (mutex) associated with each HDD and locked at a granularity coarse enough that
+seek time doesn't matter. I don't recommend making the whole application single-threaded, because that would disallow
+issuing parallel requests to multiple devices and it wouldn't allow the gains outlined above.
+
+Additionally, many operating systems allow to tell the kernel that the application will be reading the file data sequentially. 
+For example in Linux, after opening the file, just call [`posix_fadvise`](https://man7.org/linux/man-pages/man2/posix_fadvise.2.html) with `POSIX_FADV_SEQUENTIAL`:
+
+```rust
+use std::fs::*;
+use nix::fcntl::*;
+let file = File::open("foo.txt")?;
+let errno = posix_fadvise(file.as_raw_fd(), 0, 0, PosixFadviseAdvice::POSIX_FADV_SEQUENTIAL)?;
+```
+
+Internally this option increases the size of the read-ahead buffer, so the system can fetch data in larger chunks, 
+potentially reducing the number of seeks. The effects of this flag are clearly visible and it improves performance of parallel access, 
+but it is not strong enough to reduce the seek overhead to zero. Interestingly, I haven't observed any effects 
+of this flag on single-threaded throughput in my test, but YMMV. 
 
 # Conclusions
 - Random I/O and reading metadata benefits from parallelism on both types of drives: SSD and HDD
-- Avoid parallel access on HDD when reading large chunks of data sequentially
 - SSDs generally benefit from parallelism much more than HDDs
-
-
-
-
-
-
-
-
+- Parallel access to HDD when reading large chunks of data sequentially can deteriorate performance 
+- Calling `posix_fadvise` to inform the system about sequential access pattern improves read throughput slightly
+  when sharing the device between multiple threads on Linux
 
