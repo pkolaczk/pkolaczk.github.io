@@ -61,20 +61,23 @@ function makeBarChart(id, labels, data) {
 }    
 </script>
 
+While working on [fclones](https://github.com/pkolaczk/fclones) duplicate file finder,
+I've put a lot of effort into making it as fast as possible by leveraging capabilities of modern hardware.
+That's why I designed my program in a way that all data processing stages can be easily parallelized. 
+The newest version at the moment of writing this post (0.7.0) allows to set thread pools for random I/O 
+and sequential I/O separately, and can adapt the settings to different types of storage devices.
+
+In this blog post I'm presenting the results of a few experiments I've made separately on SSD and HDD.
+All the experiments were perfomed on either a Dell Precision 5520 laptop with a 4-core Xeon and a 512 NVMe SSD, from 2016, 
+running Ubuntu Linux 20.04, or an older Dell M4600 with a 7200 RPM Toshiba HDD running Mint Linux 19.03.
+
 # SSD – Metadata and Random Reads
-
-When I started working on [fclones](https://github.com/pkolaczk/fclones) duplicate file finder,
-I wanted to make it as fast as possible by leveraging capabilities of modern hardware. 
-I've got a pretty solid Dell Precision 5520 laptop with a 4-core Xeon and a 512 NVMe SSD, from 2016, 
-running Ubuntu 20.04.
-Quite likely I could get a faster machine today, but anyways it should be probably modern enough to draw 
-a few useful conclusions about I/O performance on SSD.
-
 The most time-consuming part of the job is actually reading
 the data from disk into memory in order to compute hashes. The number of files is typically large (thousands or even millions) 
-and the problem of computing their hashes is embarrassingly parallel. Scheduling work on multiple threads seemed like the right move. 
-Before writing the whole code, I did a few quick checks with scanning directory tree and fetching file metadata, and, as expected, the performance
-gains from multithreading were huge, which is illustrated in Fig. 1.
+and the problem of computing their hashes is embarrassingly parallel. 
+The first thing my duplicate finder does is scanning directory tree and fetching file metadata like file lenghts and inode identifiers. 
+This process issues a lot of random I/O requests. As expected, the performance gains from multithreading were huge, 
+which is illustrated in Fig.&nbsp;1.
 
 <div class="figure">
     <div style="height:12.5em"><canvas id="scanPerfSsd"></canvas></div>
@@ -86,9 +89,9 @@ gains from multithreading were huge, which is illustrated in Fig. 1.
     <span class="caption"> Fig.1: Time to fetch metadata of ~1.5 million file entries on an SSD</span>
 </div>
 
-In the next stage, the files matching by size are compared by hashes of their initial 4 kB block. This involves a lot of random I/O – 
-for each file, it opens it, reads first 4 kB of data, computes its hash and closes the file, then moves to the next file. 
-SSDs are great at random I/O, and high parallelism level leads to big wins here as well (Fig. 2). It was surprising to me
+In the next stage, the files matching by size are compared by hashes of their initial 4 kB block. This involves a lot of random I/O as well – 
+for each file, `fclones` opens it, reads the first 4 kB of data, computes the hash and closes the file, then moves to the next file. 
+SSDs are great at random I/O, and high parallelism level leads to big wins here as well (Fig.&nbsp;2). It was surprising to me
 that even 64 threads, which are far more than the number of CPU cores (4 physical, 8 virtual), still improved the performance.
 I guess that with requests of such a small size to such a fast storage, you need to submit really many of them to keep 
 the SSD busy.
@@ -133,7 +136,7 @@ Feel free to drop any clues in the comments.
 
 How do I known the CPU is not the main bottleneck here then? The CPU load numbers given by `iostat` are pretty high, aren't they?
 I measured how much time it takes to do the task when all the data were cached, by running it again, without prior dropping caches. 
-When all cached, the metadata scanning took 1.5 s and the partial hashing took 1.7 s. This is still
+When all cached, the metadata scanning took 1.5&nbsp;s and the partial hashing took 1.7&nbsp;s. This is still
 significantly faster than when physical reads were involved, so nope, 
 I/O is still the major bottleneck, even with 64 threads. 
 
