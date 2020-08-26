@@ -1,23 +1,25 @@
 ---
 layout: post
-title: Multiple Thread-Pools in Rust
+title: Multiple Thread Pools in Rust
 comments: true
+tags: performance concurrency Rust borrow-checker unsafe Rayon 
 excerpt_separator: <!--more-->
 ---
 
-In the previous post, I showed how processing file data in parallel can either boost or hurt performance 
+In [the previous post]({% post_url 2020-08-24-disk-parallelism %}), I showed how processing 
+file data in parallel can either boost or hurt performance 
 depending on the workload and device capabilities. Therefore, in complex programs that mix tasks
 of different types using different physical resources, e.g. CPU, storage (e.g. HDD/SSD) 
 or network I/O, a need may arise to configure parallelism levels differently for each task type. 
-This is typically solved by scheduling tasks of different types on dedicated thread-pools.
+This is typically solved by scheduling tasks of different types on dedicated thread pools.
 In this post I'm showing how to implement a solution in Rust with [Rayon](https://crates.io/crates/rayon). 
 <!--more-->
 
 After I realized multi-threaded access to data on a single HDD is a *really bad idea*, 
 I wanted to process files residing on HDD with only one thread-per-device, but still keep multithreading for SSDs.
 Also, both groups of files should be processed independently, in parallel.
-Honestly, that didn't look like something hard to do. I've been using thread-pools in Java for years.
-For each file to process, I just need to schedule an asynchronous hashing task on a proper thread-pool 
+Honestly, that didn't look like something hard to do. I've been using thread pools in Java for years.
+For each file to process, I just need to schedule an asynchronous hashing task on a proper thread pool 
 executor and that's it. How hard could that be in Rust?
 
 My program already used Rayon in a very functional style, so the main part of the code responsible for file hashing 
@@ -30,12 +32,12 @@ let hashes: Vec<FileHash> = files
   .map(|f| compute_hash(f))  // reads the contents of a file and returns its hash; blocking
   .collect();                
 ```
-In this approach, all the files are processed by the default Rayon thread-pool and
+In this approach, all the files are processed by the default Rayon thread pool and
 there is no place to tell Rayon which thread pool to use for given file.
 
-# A Single Custom Thread-Pool
+# A Single Custom Thread Pool
 
-Rayon allows to build custom thread-pools with `ThreadPoolBuilder` and `ThreadPool` structs. 
+Rayon allows to build custom thread pools with `ThreadPoolBuilder` and `ThreadPool` structs. 
 It is quite easy to create a custom thread pool and manually spawn tasks on it:
 
 ```rust
@@ -48,7 +50,7 @@ pool.spawn(|| println!("Task executes on thread: {:?}", thread::current().id()))
 pool.spawn(|| println!("Task executes on thread: {:?}", thread::current().id()));
 ```
 
-In order to process our collection on this custom thread-pool, we need to change the "main loop" of 
+In order to process our collection on this custom thread pool, we need to change the "main loop" of 
 a program slightly and replace the parallel iterator with a traditional loop and a channel to receive the 
 results:
 
@@ -73,14 +75,8 @@ let hashes: Vec<FileHash> = rx.into_iter().collect();  // ... this would block
 Now it is quite straightforward to transform this approach to more than one thread pool:
 
 ```rust
-let hdd_pool = rayon::ThreadPoolBuilder::new()
-    .num_threads(1)
-    .build()
-    .unwrap();
-let ssd_pool = rayon::ThreadPoolBuilder::new()
-    .num_threads(16)
-    .build()
-    .unwrap(); 
+let hdd_pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+let ssd_pool = rayon::ThreadPoolBuilder::new().num_threads(16).build().unwrap(); 
 
 let files: Vec<std::path::PathBuf> = ...
 let (tx, rx) = std::sync::mpsc::channel();
@@ -144,8 +140,8 @@ error[E0597]: `logger` does not live long enough
 The compiler can't see that all the tasks we spawned must finish before we leave the scope
 where `logger` is valid. This is where Rayon scopes are coming to rescue us. 
 
-Instead of spawning tasks directly on a thread-pool struct, we first need to create a scope 
-object by calling `scope` function. A scope is guaranteed to exit only after all tasks launched 
+Instead of spawning tasks directly on the thread pool struct, we first need to create a scope 
+object by calling `scope` function. The scope is guaranteed to exit only after all tasks launched 
 inside it finished. This essentially allows the tasks inside the scope to access variables that live 
 at least as long as the scope:
 
@@ -165,7 +161,7 @@ pool.scope(move |s| {
 
 What about multiple thread pools? 
 A single `Scope` in Rayon is always associated with a single `ThreadPool`. 
-Therefore, if we need multiple thread-pools, then we need multiple scopes, active at the same time.
+Therefore, if we need multiple thread pools, then we need multiple scopes, active at the same time.
 Fortunately, scopes can be nested:
 
 ```rust
@@ -208,21 +204,23 @@ with the given `ThreadPool`. The usage is quite straightforward and very similar
 ```rust
 use rayon::ThreadPoolBuilder;
 
-let pool0 = ThreadPoolBuilder::new().build().unwrap();
-let pool1 = ThreadPoolBuilder::new().build().unwrap();
+let hdd_pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+let ssd_pool = rayon::ThreadPoolBuilder::new().num_threads(16).build().unwrap(); 
+let pools = [&hdd_pool, &ssd_pool]; // this could be constructed dynamically in real-world code
+
 let common = vec![0, 1, 2]; // common data
-multi_scope(&[&pool0, &pool1], |scopes| {
-    scopes[0].spawn(|s| { /* execute on pool1, can use &common */ });
-    scopes[1].spawn(|s| { /* execute on pool2, can use &common */ });
+multi_scope(&pools, |scopes| {
+    scopes[0].spawn(|s| { /* execute on hdd_pool, can use &common */ });
+    scopes[1].spawn(|s| { /* execute on ssd_pool, can use &common */ });
 });
 ```
 
 How to implement `multi_scope`? There is no way to obtain a `Scope` value directly from Rayon.
-The only way we can get a reference to a `Scope` is inside a lambda passed to `scope`.
+The only way we can get a reference to a `Scope` is inside the lambda passed to `scope`.
 So if we need multiple scopes active at the same time, we must nest scopes in each other. 
 This sounds like a recursion. 
 
-## Fight with The Borrow Checker
+## My Code Is Correct, But The Borrow Checker Disagrees
 My initial take looked like this:
 
 ```rust
@@ -274,7 +272,7 @@ Wait, there is a hint here. As usual with Rust coding, let's apply the hint the 
 fn nest<'scope, OP, R>(pools: &[&ThreadPool], scopes: Vec<&'scope Scope<'scope>>, op: OP) -> R
 ```
 
-This made it only worse :(
+But this made it only worse:
 <pre>
 error[E0495]: cannot infer an appropriate lifetime due to conflicting requirements
   --> src/pools.rs:41:33
@@ -354,15 +352,15 @@ note: ...but the borrowed content is only valid for the anonymous lifetime #2 de
 </pre>
 
 Looks like we can't really add the new scope to the vector, because now the vector type requires 
-that its references live for the time of the outer-most scope. Rust collections obviously cannot hold
+that the references stored in it live for the time of the outermost scope. Rust collections obviously cannot hold
 references to data that lives shorter than the collection itself, therefore `'scope` must not be shorter than
 the lifetime of the vector created at the outermost recursion level.
 
-## Borrow Checker Doesn't Give Up Easily
+## The Borrow Checker Doesn't Give Up Easily
 
 Another idea I tried was to decouple the lifetime of the references inside the vector from the actual `'scope` by introducing
-a new lifetime `'vec`, hoping that the vector would narrow down the lifetime of the inner-most scope inserted into it 
-(which should be ok, because we will borrow the vector only to the inner-most scope at the end):
+a new lifetime `'vec`, hoping that the vector would narrow down the lifetime of the innermost scope inserted into it 
+(which should be ok because we will lend the vector only to the innermost scope at the end):
 
 ```rust
 fn nest<'scope, 'vec, OP, R>(pools: &[&ThreadPool], scopes: Vec<&'vec Scope<'scope>>, op: OP) -> R
@@ -400,7 +398,8 @@ This time the error message is not helpful at all. Why is the compiler saying "t
 This baffled me for a while, but eventually I realized this must have something to do with `'vec` being inferred differently 
 for the next recursion level than `'vec` on the current level. And what does it mean "`scopes` flows into `scopes`"?
 
-## The Dreaded Invariance
+## Blocked By Invariance
+
 I started experimenting a bit by removing some code and I realized these two logically incorrect versions compile just fine:
 
 ```rust
@@ -438,22 +437,23 @@ where
 }
 ```
 
-So I can either add the newly created scope to my vector as the only item, or I can pass the existing vector as is, without inserting the new scope!
+So I can either add the newly created scope to my vector as the only item, or I can pass the existing vector as is without inserting the new scope!
 But I can't do both! This problem typically happens when you try to add values of different incompatible types to a collection, but here I'm adding 
 values of the same type, so I should be fine...
 
-Wait, it turned out that Rayon's `Scope` struct is *invariant* over its lifetime parameter, and the lifetime is obviously a part of the type. 
-In this case the compiler won't coerce one scope to another, e.g. by shortening the lifetime of the outer scope to match the lifetime of the inner scope.
+Unfortunately, Rayon's `Scope` struct is *invariant* over its lifetime parameter, and the lifetime is obviously a part of the type. 
+In this case the compiler won't coerce one scope to another, e.g. by shortening the lifetime of the outer scope to match the lifetime of the inner scope,
+nor by extending the lifetime of the inner scope to match the outer scope. 
 This means we can't put references to two scopes into a single vector, at least not without changing the 
 source code of Rayon or changing how the type system works in Rust. What a bummer! 
 
-## Unsafe Rescue
+## Going Unsafe
 
 Fortunately, the tiny difference in scope lifetimes caused by nesting is all internal to the `nest` function and is never observable by 
 the client's code. From the outside, we can safely assume all scopes were created with the same lifetime – 
-they are all created by `nest` and all dropped by it together. 
+they are all created by `nest` and all dropped by it together.  
 
-This is the moment, where Rust's `unsafe` comes to the rescue. 
+This is the moment where Rust's `unsafe` comes to the rescue. 
 We can "cheat" a bit, and let the compiler adjust our scope lifetimes so they match and can be stored in a single vector:
 
 ```rust
@@ -500,4 +500,5 @@ where
     }
 }
 ```
+
 
