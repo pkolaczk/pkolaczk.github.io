@@ -31,6 +31,7 @@ external:                    # see http://fontawesome.com/icons
   - {title: RSS, icon: rss, url: "/feed.xml"}
 
 comments:
+  disqus: true
   disqus_shortname: pkolaczk        # see https://disqus.com/
 #  isso_domain: ""                  # see https://posativ.org/isso/
 
