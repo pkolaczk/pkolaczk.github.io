@@ -1,6 +1,6 @@
 title: "Piotr Kołaczkowski"
 author: "Piotr Kołaczkowski"
-description: "My blog about computer programming"
+description: "Blog on programming, optimization and performance analysis"
 permalink: /:title/
 lang: "en"
 excerpt_separator: "\n\n\n"
@@ -11,7 +11,7 @@ date_format: "%B %d, %Y"
 sidebar: true                # show a sidebar instead of the usual header
 show_excerpts: true          # show article excerpts on the home page
 show_related: true           # show the previous and next links after every post
-show_description: false      # show the site description in the sidebar
+show_description: true       # show the site description in the sidebar
 show_title: true             # always keep the site title visible
 
 # Styling
