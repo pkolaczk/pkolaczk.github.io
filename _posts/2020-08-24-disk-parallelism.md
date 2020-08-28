@@ -16,7 +16,7 @@ Can we lose any?
 <script>
 var colors = ["rgba(230,140,35,0.8)", "rgba(130,20,0,0.8)"]
 
-function makeBarChart(id, labels, data) {    
+function makeBarChart(id, labels, data) {   
     var ctx = document.getElementById(id).getContext('2d');
     var datasets = [];
     var colorIndex = 0;
@@ -59,6 +59,15 @@ function makeBarChart(id, labels, data) {
         }
     });
 }    
+
+function makeBarChartDeferred(id, labels, data) {
+    document.addEventListener('readystatechange', event => {
+        if (event.target.readyState === "complete") {
+            makeBarChart(id, labels, data);
+        }
+    });      
+}
+
 </script>
 
 While working on [fclones](https://github.com/pkolaczk/fclones) duplicate file finder,
@@ -82,7 +91,7 @@ which is illustrated in Fig.&nbsp;1.
 <div class="figure">
     <div style="height:12.5em"><canvas id="scanPerfSsd"></canvas></div>
     <script>
-    makeBarChart("scanPerfSsd", 
+    makeBarChartDeferred("scanPerfSsd", 
         [1, 2, 4, 8, 16, 32],
         {"time": [40.38, 19.18, 9.85, 5.74, 4.155, 3.64]});
     </script>
@@ -99,7 +108,7 @@ the SSD busy.
 <div class="figure">
     <div style="height:14em"><canvas id="prefixHashPerfSsd"></canvas></div>
     <script>
-    makeBarChart("prefixHashPerfSsd", 
+    makeBarChartDeferred("prefixHashPerfSsd", 
         [1, 2, 4, 8, 16, 32, 64], 
         {"time": [198, 88.5, 40.1, 23.0, 10.75, 6.69, 5.43]});
     </script>
@@ -152,7 +161,7 @@ it can keep the SSD busy even when my application is not asking for data for a w
 <div class="figure">
     <div style="height:14em"><canvas id="fullHashPerfSsd"></canvas></div>
     <script>
-    makeBarChart("fullHashPerfSsd", 
+    makeBarChartDeferred("fullHashPerfSsd", 
             [1, 2, 4, 8, 16, 32, 64],
             {"time": [74.3, 33.74, 20.1, 16.75, 15.45, 15.20, 15.15]});
     </script>
@@ -179,7 +188,7 @@ the distance the HDD heads have to travel.
 <div class="figure">
     <div style="height:14em"><canvas id="partialHashPerfHdd"></canvas></div>
     <script>
-    makeBarChart("partialHashPerfHdd", 
+    makeBarChartDeferred("partialHashPerfHdd", 
             [1, 2, 4, 8, 16, 64, 256],
             {"time": [681.92, 358.34, 316.53, 276.68, 245.06, 225.99, 227.40]});
     </script>
@@ -195,7 +204,7 @@ system and its configuration, but generally I'd expect this to be a factor 2x-10
 <div class="figure">
     <div style="height:18em"><canvas id="fullHashPerfHdd"></canvas></div>
     <script>
-    makeBarChart("fullHashPerfHdd", 
+    makeBarChartDeferred("fullHashPerfHdd", 
             [1, 2, 4, 8, 16, 64], 
             {"fadvise": [24.131, 54.59, 48.44, 45.114, 42.54, 42.102], 
              "no fadvise": [24.193, 67.835, 51.237, 53.45, 53.99, 52.24]});
