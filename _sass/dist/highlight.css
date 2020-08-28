@@ -104,7 +104,11 @@
 .highlight .nt {
   color: #F1C829;
 }
-.highlight .nv, .highlight .ow, .highlight .w {
+.highlight .nv {
+  color: #40A0A0;
+  font-style: italic;
+}
+.highlight .ow, .highlight .w {
   color: #A9B7C6;
 }
 .highlight .mb, .highlight .mf, .highlight .mh, .highlight .mi, .highlight .mo {
