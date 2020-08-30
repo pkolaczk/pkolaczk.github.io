@@ -5,6 +5,7 @@ layout: default
 <article>
   {% include meta.html post=page %}
   {{ content }}
+  {% include share-buttons.html %}
   {% if page.comments != false and site.comments.isso or site.comments.disqus %}
     <hr>
     {% if site.comments.isso_domain %}<div id="isso-thread"></div>{% endif %}
