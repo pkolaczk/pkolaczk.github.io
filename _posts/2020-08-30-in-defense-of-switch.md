@@ -7,7 +7,7 @@ excerpt_separator: <!--more-->
 ---
 
 Recently I came across a [blog post](https://levelup.gitconnected.com/if-else-is-a-poor-mans-polymorphism-ab0b333b7265)
-whose author claims, from the perspective of good coding practices, dynamic polymorphism is strictly superior to branching. 
+whose author claims, from the perspective of good coding practices, polymorphism is strictly superior to branching. 
 In the post they make general statements about how branching statements lead to unreadable, unmaintainable, inflexible code and
 how they are a sign of immaturity. However, in my opinion, the topic is much deeper and in this post 
 I try to objectively discuss the reasons for and against branching.
@@ -42,7 +42,7 @@ Why such a silly example? Who is writing calculators these days? Probably no-one
 in many programming classes. And it is easy enough to illustrate the concept. 
 
 How can we model a structure to represent an expression?
-You'd probably use something allowing to build a tree:
+You'd probably use classes or structures. Here is the code in Scala:
 
 ```scala
 trait Expression {
