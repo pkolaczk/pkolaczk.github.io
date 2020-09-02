@@ -290,15 +290,15 @@ println!("Total len: {}", len);
 
 A `perf stat` on this program yields:
 <pre>
-      6 777,73 msec task-clock                #    1,000 CPUs utilized          
+      6 777,73 msec task-clock                #    1,000 CPUs utilized          
             13      context-switches          #    0,002 K/sec                  
              1      cpu-migrations            #    0,000 K/sec                  
-         4 047      page-faults               #    0,597 K/sec                  
-23 800 190 663      cycles                    #    3,512 GHz                    
-10 076 137 503      instructions              #    0,42  insn per cycle         
- 4 012 788 756      branches                  #    592,055 M/sec                  
-   667 673 937      branch-misses             #    16,64% of all branches        
-     4 556 657      LLC-loads-misses     
+         4 047      page-faults               #    0,597 K/sec                  
+23 800 190 663      cycles                    #    3,512 GHz                    
+10 076 137 503      instructions              #    0,42  insn per cycle         
+ 4 012 788 756      branches                  #    592,055 M/sec                  
+   667 673 937      branch-misses             #    16,64% of all branches        
+     4 556 657      LLC-loads-misses     
 
    6,778608106 seconds time elapsed
 </pre>
@@ -370,15 +370,15 @@ the job. So not only the vector is now totally flat and there is no pointer chas
 but also there are no jumps. The effect on performance is significant:
 
 <pre>
-      1 762,37 msec task-clock                #    1,000 CPUs utilized          
+      1 762,37 msec task-clock                #    1,000 CPUs utilized          
              8      context-switches          #    0,005 K/sec                  
              0      cpu-migrations            #    0,000 K/sec                  
            387      page-faults               #    0,220 K/sec                  
- 6 361 343 641      cycles                    #    3,610 GHz                    
-10 053 423 994      instructions              #    1,58  insn per cycle         
- 3 009 768 006      branches                  #    1707,796 M/sec                  
-     1 127 367      branch-misses             #    0,04% of all branches        
-        33 221      LLC-loads-misses 
+ 6 361 343 641      cycles                    #    3,610 GHz                    
+10 053 423 994      instructions              #    1,58  insn per cycle         
+ 3 009 768 006      branches                  #    1707,796 M/sec                  
+     1 127 367      branch-misses             #    0,04% of all branches        
+        33 221      LLC-loads-misses 
 
    1,762797864 seconds time elapsed
 </pre>
