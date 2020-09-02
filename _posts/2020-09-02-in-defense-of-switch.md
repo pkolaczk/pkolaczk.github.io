@@ -1,6 +1,6 @@
 ---
 layout: post
-title: In Defense of A Switch 
+title: In Defense of a Switch 
 comments: true
 tags: OOP, code-style, polymorphism, dynamic dispatch, pattern matching, Rust, Scala 
 excerpt_separator: <!--more-->
