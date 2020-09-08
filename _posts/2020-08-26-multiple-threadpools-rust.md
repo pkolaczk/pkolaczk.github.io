@@ -501,4 +501,77 @@ where
 }
 ```
 
+## Update: Getting Rid of Unsafe 
+Fortunately Rayon 1.4.0 changed its `scope` signature a bit and now it is possible to completely avoid `unsafe`.
 
+Rayon 1.3.0 defines `scope` function as follows:
+
+```rust
+/// Creates a scope that executes within this thread-pool.
+/// Equivalent to `self.install(|| scope(...))`.
+///
+/// See also: [the `scope()` function][scope].
+///
+/// [scope]: fn.scope.html
+pub fn scope<'scope, OP, R>(&self, op: OP) -> R
+where
+    OP: for<'s> FnOnce(&'s Scope<'scope>) -> R + 'scope + Send,
+    R: Send,
+{
+    self.install(|| scope(op))
+}
+```
+
+There is an explicit requirement that the passed `op` lambda lives for at least as
+long as `'scope` therefore `'scope` can never be inferred to be wider than the lifetime of `op`.
+
+In Rayon 1.4.0 `scope` has been changed into:
+
+```rust
+/// Creates a scope that executes within this thread-pool.
+/// Equivalent to `self.install(|| scope(...))`.
+///
+/// See also: [the `scope()` function][scope].
+///
+/// [scope]: fn.scope.html
+pub fn scope<'scope, OP, R>(&self, op: OP) -> R
+where
+    OP: FnOnce(&Scope<'scope>) -> R + Send,
+    R: Send,
+{
+    self.install(|| scope(op))
+}
+```
+
+Now the `'scope` is allowed to be a wider lifetime than the lifetime of a lambda.
+If we nest scopes, they all can get the same `'scope` that can hold the outermost 
+lambda. Therefore it is enough to remove the `+ 'scope` requirement in our code and drop the
+`adjust_lifetime` call:
+
+```rust
+use rayon::{Scope, ThreadPool};
+
+fn nest<'scope, OP, R>(pools: &[&ThreadPool], scopes: Vec<&Scope<'scope>>, op: OP) -> R
+where
+    OP: FnOnce(&[&Scope<'scope>]) -> R + Send,
+    R: Send,
+{
+    if !pools.is_empty() {
+        pools[0].scope(move |s| {
+            let mut scopes = scopes;
+            scopes.push(s);
+            nest(&pools[1..], scopes, op)
+        })
+    } else {
+        (op)(&scopes)
+    }
+}
+
+pub fn multi_scope<'scope, OP, R>(pools: &[&ThreadPool], op: OP) -> R
+where
+    OP: FnOnce(&[&Scope<'scope>]) -> R + Send,
+    R: Send,
+{
+    nest(pools, Vec::with_capacity(pools.len()), op)
+}
+```
