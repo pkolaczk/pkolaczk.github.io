@@ -567,6 +567,25 @@ where
     }
 }
 
+/// Creates multiple Rayon scopes, one per given `ThreadPool`, around the given lambda `op`.
+/// The purpose of this method is to be able to spawn tasks on multiple thread pools when
+/// the number of thread pools is not known at compile-time. Same as with a single scope,
+/// all tasks spawned by `op` are guaranteed to finish before this call exits, so they
+/// are allowed to access structs from outside of the scope.
+///
+/// # Example
+/// ```
+/// use rayon::ThreadPoolBuilder;
+/// use fclones::pools::multi_scope;
+///
+/// let pool1 = ThreadPoolBuilder::new().build().unwrap();
+/// let pool2 = ThreadPoolBuilder::new().build().unwrap();
+/// let common = vec![0, 1, 2]; // common data, must be Send
+/// multi_scope(&[&pool1, &pool2], |scopes| {
+///     scopes[0].spawn(|_| { /* execute on pool1, can use &common */ });
+///     scopes[1].spawn(|_| { /* execute on pool2, can use &common */ });
+/// });
+/// ```
 pub fn multi_scope<'scope, OP, R>(pools: &[&ThreadPool], op: OP) -> R
 where
     OP: FnOnce(&[&Scope<'scope>]) -> R + Send,
