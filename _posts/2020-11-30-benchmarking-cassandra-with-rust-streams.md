@@ -1,6 +1,6 @@
 ---
 layout: post
-title: Benchmarking Apache Cassandra – A Scalable Approach with Rust Streams
+title: Scalable Benchmarking with Rust Streams
 comments: true
 tags: Rust, Cassandra, async, CQL driver, Tokio, Streams
 excerpt_separator: <!--more-->
