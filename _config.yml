@@ -6,6 +6,10 @@ lang: "en"
 excerpt_separator: "\n\n\n"
 date_format: "%B %d, %Y"
 
+markdown: kramdown
+kramdown:
+  math_engine: katex
+
 # Layout
 
 sidebar: true                # show a sidebar instead of the usual header

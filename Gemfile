@@ -30,3 +30,6 @@ gem "wdm", "~> 0.1.1", :platforms => [:mingw, :x64_mingw, :mswin]
 
 gem "plainwhite"
 gem "jekyll-remote-theme"
+
+# MathML support
+gem "kramdown-math-katex"
