@@ -10,6 +10,9 @@ markdown: kramdown
 kramdown:
   math_engine: katex
 
+scholar:
+  style: /assets/bibliography/ieee.csl
+
 # Layout
 
 sidebar: true                # show a sidebar instead of the usual header
@@ -39,7 +42,10 @@ comments:
   disqus_shortname: pkolaczk        # see https://disqus.com/
 #  isso_domain: ""                  # see https://posativ.org/isso/
 
+
+
 plugins: 
   - jekyll-feed
+  - jekyll-scholar
   
 

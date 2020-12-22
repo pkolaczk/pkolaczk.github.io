@@ -33,3 +33,7 @@ gem "jekyll-remote-theme"
 
 # MathML support
 gem "kramdown-math-katex"
+
+# Bibliography support
+gem 'jekyll-scholar', group: :jekyll_plugins
+
