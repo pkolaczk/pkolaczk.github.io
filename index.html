@@ -1,10 +1,173 @@
----
-layout: default
-title: "Home"
----
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+  <title>Home | Piotr Kołaczkowski</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Blog on programming, optimization and performance analysis">
+  <meta name="author" content="Piotr Kołaczkowski">
+  <meta name="generator" content="Jekyll v4.1.1">
+  <!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-PBJQD2M');</script>
+<!-- End Google Tag Manager -->
 
-{% if site.show_excerpts %}
-  {% include home.html %}
-{% else %}
-  {% include archive.html title="Posts" %}
-{% endif %}
+  <link rel="canonical" href="/">
+  
+  <link rel="stylesheet" href="/assets/css/index.css">
+  
+  <link rel="stylesheet" href="/assets/css/classes.css">
+  <link rel="stylesheet" href="/assets/css/sidebar.css" media="screen and (min-width: 70em)">
+  <link rel="alternate" href="/feed.xml" type="application/atom+xml" title="Piotr Kołaczkowski">
+  
+  
+  <script defer src="/assets/node_modules/chart.js/dist/Chart.min.js"></script>
+</head>
+<body>
+  <!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-PBJQD2M"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
+  <header class="icons">
+    
+      <a href="/" class="title">Piotr Kołaczkowski</a>
+    
+    
+      
+  <nav>
+  <a aria-label="Home" href="/" class="selected"><svg aria-hidden="true" class="hidden"><use xlink:href="/assets/fontawesome/icons.svg#home"></use></svg><span aria-hidden="true" >Home</span></a>
+  <a aria-label="About" href="/about/" ><svg aria-hidden="true" class="hidden"><use xlink:href="/assets/fontawesome/icons.svg#address-card"></use></svg><span aria-hidden="true" >About</span></a>
+  
+  </nav>
+
+
+      
+  <nav>
+  <a aria-label="Mail" href="mailto:pkolaczk@gmail.com" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#envelope"></use></svg><span aria-hidden="true" class="hidden">Mail</span></a>
+  <a aria-label="Github" href="https://github.com/pkolaczk" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#github"></use></svg><span aria-hidden="true" class="hidden">Github</span></a>
+  <a aria-label="LinkedIn" href="https://www.linkedin.com/in/pkolaczk" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#linkedin"></use></svg><span aria-hidden="true" class="hidden">LinkedIn</span></a>
+  <a aria-label="RSS" href="/feed.xml" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#rss"></use></svg><span aria-hidden="true" class="hidden">RSS</span></a>
+  
+  </nav>
+
+
+    
+    
+      <div class="hidden description">Blog on programming, optimization and performance analysis</div>
+    
+
+  </header>
+
+  
+  
+  <article>
+    <header>
+  
+  <h1><a href="/estimating-benchmark-errors/">Estimating Benchmark Results Uncertainty</a></h1><time datetime="2020-12-28T00:00:00+01:00">December 28, 2020</time>
+</header>
+
+    <p>Physicists say that a measurement result given without an error estimate is worthless. This applies
+to benchmarking as well. We not only want to know how performant a computer program or a system is, 
+but we also want to know if we can trust the performance numbers. This article explains how to compute
+uncertainty intervals and how to avoid some traps caused by applying commonly known
+statistical methods without validating their assumptions first.</p>
+
+
+    <div class="more"><a href="/estimating-benchmark-errors/">read more</a></div>
+  </article>
+
+  <article>
+    <header>
+  
+  <h1><a href="/benchmarking-cassandra-with-rust-streams/">Scalable Benchmarking with Rust Streams</a></h1><time datetime="2020-11-30T00:00:00+01:00">November 30, 2020</time>
+</header>
+
+    <p>In <a href="/benchmarking-cassandra/">the previous post</a> I showed how to use asynchronous 
+Rust to measure throughput and response times of a Cassandra cluster. 
+That approach works pretty well on a developer’s laptop, but it turned out it doesn’t scale to bigger machines. 
+I’ve hit a hard limit around 150k requests per
+second, and it wouldn’t go faster regardless of the performance of the server. 
+In this post I share a different approach that doesn’t have these scalability problems. 
+I was able to saturate a 24-core single node Cassandra server
+at 800k read queries per second with a single client machine.</p>
+
+
+    <div class="more"><a href="/benchmarking-cassandra-with-rust-streams/">read more</a></div>
+  </article>
+
+  <article>
+    <header>
+  
+  <h1><a href="/benchmarking-cassandra/">Benchmarking Apache Cassandra with Rust</a></h1><time datetime="2020-10-05T00:00:00+02:00">October 05, 2020</time>
+</header>
+
+    <p>Performance of a database system depends on many factors: hardware, configuration, 
+database schema, amount of data, workload type, network latency, and many others.
+Therefore, one typically can’t tell the actual performance of such system without
+first measuring it. In this blog post I’m describing how to build a benchmarking tool
+for Apache Cassandra from scratch in Rust and how to avoid many pitfalls. 
+The techniques I show are applicable to any system with an async API.</p>
+
+
+    <div class="more"><a href="/benchmarking-cassandra/">read more</a></div>
+  </article>
+
+  <article>
+    <header>
+  
+  <h1><a href="/in-defense-of-switch/">In Defense of a Switch</a></h1><time datetime="2020-09-02T00:00:00+02:00">September 02, 2020</time>
+</header>
+
+    <p>Recently I came across a <a href="https://levelup.gitconnected.com/if-else-is-a-poor-mans-polymorphism-ab0b333b7265">blog post</a>
+whose author claims, from the perspective of good coding practices, polymorphism is strictly superior to branching. 
+In the post they make general statements about how branching statements lead to unreadable, unmaintainable, inflexible code and
+how they are a sign of immaturity. However, in my opinion, the topic is much deeper and in this post 
+I try to objectively discuss the reasons for and against branching.</p>
+
+
+    <div class="more"><a href="/in-defense-of-switch/">read more</a></div>
+  </article>
+
+  <article>
+    <header>
+  
+  <h1><a href="/multiple-threadpools-rust/">Multiple Thread Pools in Rust</a></h1><time datetime="2020-08-26T00:00:00+02:00">August 26, 2020</time>
+</header>
+
+    <p>In <a href="/disk-parallelism/">the previous post</a>, I showed how processing 
+file data in parallel can either boost or hurt performance 
+depending on the workload and device capabilities. Therefore, in complex programs that mix tasks
+of different types using different physical resources, e.g. CPU, storage (e.g. HDD/SSD) 
+or network I/O, a need may arise to configure parallelism levels differently for each task type. 
+This is typically solved by scheduling tasks of different types on dedicated thread pools.
+In this post I’m showing how to implement a solution in Rust with <a href="https://crates.io/crates/rayon">Rayon</a>.</p>
+
+    <div class="more"><a href="/multiple-threadpools-rust/">read more</a></div>
+  </article>
+
+  <article>
+    <header>
+  
+  <h1><a href="/disk-parallelism/">Performance Impact of Parallel Disk Access</a></h1><time datetime="2020-08-24T00:00:00+02:00">August 24, 2020</time>
+</header>
+
+    <p>One of the well-known ways of speeding up a data processing task is partitioning the data into smaller
+chunks and processing the chunks in parallel. Let’s assume we can partition the task easily, or the input data is already 
+partitioned into separate files which all reside on a single storage device. Let’s also assume the algorithm we run on those
+data is simple enough so that the computation time is not a bottleneck. How much performance can we gain by reading the files in parallel? 
+Can we lose any?</p>
+
+
+    <div class="more"><a href="/disk-parallelism/">read more</a></div>
+  </article>
+
+
+
+
+
+
+</body>
+</html>

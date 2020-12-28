@@ -1,0 +1,14 @@
+{
+	"version": 3,
+	"file": "sidebar.css",
+	"sources": [
+		"sidebar.sass",
+		"_sass/index.sass"
+	],
+	"sourcesContent": [
+		"@import \"index\";\n\nbody {\n  font-size: 1.08em;\n  margin: 0 0 0 16.5em;\n  max-width: inherit;\n  overscroll-behavior: none; }\n\nbody > article, body > footer {\n  margin: 0 5em;\n  padding: 2em 0;\n  max-width: 50em; }\n\nbody > header {\n  display: block;\n  position: fixed;\n  overflow: auto;\n  background: darken($dark, 2%);\n  color: #fff;\n  border: none;\n  box-shadow: none;\n  opacity: .98;\n  margin: 0;\n  padding: 2.25em;\n  width: 12em;\n  top: 0;\n  bottom: 0;\n  left: 0; }\n\narticle header h1 {\n  font-size: 2em; }\n\nnav {\n  margin: 0 -2.25em; }\n\nnav a {\n  display: block;\n  margin: 0;\n  padding: .5em 2.25em; }\n\nnav a:hover, nav a.selected {\n  background: lighten($dark, 2%);\n  text-decoration: inherit; }\n\narticle:not(:last-child) {\n  border-bottom-color: reduce(20); }\n\n.icons svg {\n  margin-right: 1.2em; }\n\n.hidden {\n  display: inline-block; }\n\n\n\n.title {\n  display: block;\n  font-size: 1.5em;\n  margin-bottom: 1em; }\n\n\n\n\n\n.description {\n  margin: 2em 0; }\n\n\n",
+		"$font-size: calc(0.9rem + 0.2vw) !default;\n$font-weight: 400 !default;\n$heading-weight: 600 !default;\n$line-height: 1.5 !default;\n$link-color: #68f !default;\n$dark: #1c1d22 !default;\n$light: #ffffff !default;\n\n@function reduce ($percent) {\n  @return rgba(mix($dark, $light), $percent / 100); }\n"
+	],
+	"names": [],
+	"mappings": "AAEA,AAAA,IAAI,CAAC,EACH,SAAS,EAAE,MAAM,EACjB,MAAM,EAAE,YAAY,EACpB,SAAS,EAAE,OAAO,EAClB,mBAAmB,EAAE,IAAI,GAAG;;AAE9B,AAAA,IAAI,GAAG,OAAO,EAAE,IAAI,GAAG,MAAM,CAAC,EAC5B,MAAM,EAAE,KAAK,EACb,OAAO,EAAE,KAAK,EACd,SAAS,EAAE,IAAI,GAAG;;AAEpB,AAAA,IAAI,GAAG,MAAM,CAAC,EACZ,OAAO,EAAE,KAAK,EACd,QAAQ,EAAE,KAAK,EACf,QAAQ,EAAE,IAAI,EACd,UAAU,ECZL,OAAO,EDaZ,KAAK,EAAE,IAAI,EACX,MAAM,EAAE,IAAI,EACZ,UAAU,EAAE,IAAI,EAChB,OAAO,EAAE,GAAG,EACZ,MAAM,EAAE,CAAC,EACT,OAAO,EAAE,MAAM,EACf,KAAK,EAAE,IAAI,EACX,GAAG,EAAE,CAAC,EACN,MAAM,EAAE,CAAC,EACT,IAAI,EAAE,CAAC,GAAG;;AAEZ,AAAA,OAAO,CAAC,MAAM,CAAC,EAAE,CAAC,EAChB,SAAS,EAAE,GAAG,GAAG;;AAEnB,AAAA,GAAG,CAAC,EACF,MAAM,EAAE,SAAS,GAAG;;AAEtB,AAAA,GAAG,CAAC,CAAC,CAAC,EACJ,OAAO,EAAE,KAAK,EACd,MAAM,EAAE,CAAC,EACT,OAAO,EAAE,WAAW,GAAG;;AAEzB,AAAA,GAAG,CAAC,CAAC,CAAC,KAAK,EAAE,GAAG,CAAC,CAAC,AAAA,SAAS,CAAC,EAC1B,UAAU,ECpCL,OAAO,EDqCZ,eAAe,EAAE,OAAO,GAAG;;AAE7B,AAAA,OAAO,CAAA,GAAK,EAAC,UAAU,EAAE,EACvB,mBAAmB,ECpCN,wBAAkB,GDoCG;;AAEpC,AAAA,MAAM,CAAC,GAAG,CAAC,EACT,YAAY,EAAE,KAAK,GAAG;;AAExB,AAAA,OAAO,CAAC,EACN,OAAO,EAAE,YAAY,GAAG;;AAI1B,AAAA,MAAM,CAAC,EACL,OAAO,EAAE,KAAK,EACd,SAAS,EAAE,KAAK,EAChB,aAAa,EAAE,GAAG,GAAG;;AAMvB,AAAA,YAAY,CAAC,EACX,MAAM,EAAE,KAAK,GAAG"
+}

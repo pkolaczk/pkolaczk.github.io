@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+  <title>Multiple Thread Pools in Rust | Piotr Kołaczkowski</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="In the previous post, I showed how processing file data in parallel can either boost or hurt performance depending on the workload and device capabilities. T...">
+  <meta name="author" content="Piotr Kołaczkowski">
+  <meta name="generator" content="Jekyll v4.1.1">
+  <!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-PBJQD2M');</script>
+<!-- End Google Tag Manager -->
+
+  <link rel="canonical" href="/multiple-threadpools-rust/">
+  
+  <link rel="stylesheet" href="/assets/css/index.css">
+  
+  <link rel="stylesheet" href="/assets/css/classes.css">
+  <link rel="stylesheet" href="/assets/css/sidebar.css" media="screen and (min-width: 70em)">
+  <link rel="alternate" href="/feed.xml" type="application/atom+xml" title="Piotr Kołaczkowski">
+  
+  
+  <script defer src="/assets/node_modules/chart.js/dist/Chart.min.js"></script>
+</head>
+<body>
+  <!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-PBJQD2M"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
+  <header class="icons">
+    
+      <a href="/" class="title">Piotr Kołaczkowski</a>
+    
+    
+      
+  <nav>
+  <a aria-label="Home" href="/" ><svg aria-hidden="true" class="hidden"><use xlink:href="/assets/fontawesome/icons.svg#home"></use></svg><span aria-hidden="true" >Home</span></a>
+  <a aria-label="About" href="/about/" ><svg aria-hidden="true" class="hidden"><use xlink:href="/assets/fontawesome/icons.svg#address-card"></use></svg><span aria-hidden="true" >About</span></a>
+  
+  </nav>
+
+
+      
+  <nav>
+  <a aria-label="Mail" href="mailto:pkolaczk@gmail.com" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#envelope"></use></svg><span aria-hidden="true" class="hidden">Mail</span></a>
+  <a aria-label="Github" href="https://github.com/pkolaczk" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#github"></use></svg><span aria-hidden="true" class="hidden">Github</span></a>
+  <a aria-label="LinkedIn" href="https://www.linkedin.com/in/pkolaczk" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#linkedin"></use></svg><span aria-hidden="true" class="hidden">LinkedIn</span></a>
+  <a aria-label="RSS" href="/feed.xml" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#rss"></use></svg><span aria-hidden="true" class="hidden">RSS</span></a>
+  
+  </nav>
+
+
+    
+    
+      <div class="hidden description">Blog on programming, optimization and performance analysis</div>
+    
+
+  </header>
+
+  <article>
+  <header>
+  
+  <h1><a href="/multiple-threadpools-rust/">Multiple Thread Pools in Rust</a></h1><time datetime="2020-08-26T00:00:00+02:00">August 26, 2020</time>
+</header>
+
+  <p>In <a href="/disk-parallelism/">the previous post</a>, I showed how processing 
+file data in parallel can either boost or hurt performance 
+depending on the workload and device capabilities. Therefore, in complex programs that mix tasks
+of different types using different physical resources, e.g. CPU, storage (e.g. HDD/SSD) 
+or network I/O, a need may arise to configure parallelism levels differently for each task type. 
+This is typically solved by scheduling tasks of different types on dedicated thread pools.
+In this post I’m showing how to implement a solution in Rust with <a href="https://crates.io/crates/rayon">Rayon</a>. 
+<!--more--></p>
+
+<p>After I realized multi-threaded access to data on a single HDD is a <em>really bad idea</em>, 
+I wanted to process files residing on HDD with only one thread-per-device, but still keep multithreading for SSDs.
+Also, both groups of files should be processed independently, in parallel.
+Honestly, that didn’t look like something hard to do. I’ve been using thread pools in Java for years.
+For each file to process, I just need to schedule an asynchronous hashing task on a proper thread pool 
+executor and that’s it. How hard could that be in Rust?</p>
+
+<p>My program already used Rayon in a very functional style, so the main part of the code responsible for file hashing 
+looked like that:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">files</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;</span><span class="nn">std</span><span class="p">::</span><span class="nn">path</span><span class="p">::</span><span class="n">PathBuf</span><span class="o">&gt;</span> <span class="o">=</span> <span class="o">...</span>   <span class="c">// collection of input files</span>
+<span class="k">let</span> <span class="n">hashes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;</span><span class="n">FileHash</span><span class="o">&gt;</span> <span class="o">=</span> <span class="n">files</span>
+  <span class="nf">.into_par_iter</span><span class="p">()</span>           <span class="c">// creates a Rayon parallel iterator over all files</span>
+  <span class="nf">.map</span><span class="p">(|</span><span class="n">f</span><span class="p">|</span> <span class="nf">compute_hash</span><span class="p">(</span><span class="n">f</span><span class="p">))</span>  <span class="c">// reads the contents of a file and returns its hash; blocking</span>
+  <span class="nf">.collect</span><span class="p">();</span>                
+</code></pre></div></div>
+<p>In this approach, all the files are processed by the default Rayon thread pool and
+there is no place to tell Rayon which thread pool to use for given file.</p>
+
+<h1 id="a-single-custom-thread-pool">A Single Custom Thread Pool</h1>
+
+<p>Rayon allows to build custom thread pools with <code class="language-plaintext highlighter-rouge">ThreadPoolBuilder</code> and <code class="language-plaintext highlighter-rouge">ThreadPool</code> structs. 
+It is quite easy to create a custom thread pool and manually spawn tasks on it:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">use</span> <span class="nn">std</span><span class="p">::</span><span class="n">thread</span><span class="p">;</span>
+<span class="k">let</span> <span class="n">pool</span> <span class="o">=</span> <span class="nn">rayon</span><span class="p">::</span><span class="nn">ThreadPoolBuilder</span><span class="p">::</span><span class="nf">new</span><span class="p">()</span>
+    <span class="nf">.num_threads</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+    <span class="nf">.build</span><span class="p">()</span>
+    <span class="nf">.unwrap</span><span class="p">();</span>
+<span class="n">pool</span><span class="nf">.spawn</span><span class="p">(||</span> <span class="nd">println!</span><span class="p">(</span><span class="s">"Task executes on thread: {:?}"</span><span class="p">,</span> <span class="nn">thread</span><span class="p">::</span><span class="nf">current</span><span class="p">()</span><span class="nf">.id</span><span class="p">()));</span>
+<span class="n">pool</span><span class="nf">.spawn</span><span class="p">(||</span> <span class="nd">println!</span><span class="p">(</span><span class="s">"Task executes on thread: {:?}"</span><span class="p">,</span> <span class="nn">thread</span><span class="p">::</span><span class="nf">current</span><span class="p">()</span><span class="nf">.id</span><span class="p">()));</span>
+</code></pre></div></div>
+
+<p>In order to process our collection on this custom thread pool, we need to change the “main loop” of 
+a program slightly and replace the parallel iterator with a traditional loop and a channel to receive the 
+results:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">pool</span> <span class="o">=</span> <span class="nn">rayon</span><span class="p">::</span><span class="nn">ThreadPoolBuilder</span><span class="p">::</span><span class="nf">new</span><span class="p">()</span>
+    <span class="nf">.num_threads</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+    <span class="nf">.build</span><span class="p">()</span>
+    <span class="nf">.unwrap</span><span class="p">();</span>
+<span class="k">let</span> <span class="n">files</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;</span><span class="nn">std</span><span class="p">::</span><span class="nn">path</span><span class="p">::</span><span class="n">PathBuf</span><span class="o">&gt;</span> <span class="o">=</span> <span class="o">...</span>
+<span class="k">let</span> <span class="p">(</span><span class="n">tx</span><span class="p">,</span> <span class="n">rx</span><span class="p">)</span> <span class="o">=</span> <span class="nn">std</span><span class="p">::</span><span class="nn">sync</span><span class="p">::</span><span class="nn">mpsc</span><span class="p">::</span><span class="nf">channel</span><span class="p">();</span>
+<span class="k">for</span> <span class="n">f</span> <span class="n">in</span> <span class="n">files</span><span class="nf">.into_iter</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">let</span> <span class="n">tx</span> <span class="o">=</span> <span class="n">tx</span><span class="nf">.clone</span><span class="p">();</span>  
+    <span class="n">pool</span><span class="nf">.spawn</span><span class="p">(</span><span class="k">move</span> <span class="p">||</span> <span class="p">{</span> 
+        <span class="n">tx</span><span class="nf">.send</span><span class="p">(</span><span class="nf">compute_hash</span><span class="p">(</span><span class="n">f</span><span class="p">))</span><span class="nf">.unwrap</span><span class="p">();</span> 
+    <span class="p">});</span>
+<span class="p">}</span>
+<span class="k">drop</span><span class="p">(</span><span class="n">tx</span><span class="p">);</span> <span class="c">// need to close all senders, otherwise...</span>
+<span class="k">let</span> <span class="n">hashes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;</span><span class="n">FileHash</span><span class="o">&gt;</span> <span class="o">=</span> <span class="n">rx</span><span class="nf">.into_iter</span><span class="p">()</span><span class="nf">.collect</span><span class="p">();</span>  <span class="c">// ... this would block</span>
+</code></pre></div></div>
+
+<h1 id="multiple-thread-pools">Multiple Thread Pools</h1>
+<p>Now it is quite straightforward to transform this approach to more than one thread pool:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">hdd_pool</span> <span class="o">=</span> <span class="nn">rayon</span><span class="p">::</span><span class="nn">ThreadPoolBuilder</span><span class="p">::</span><span class="nf">new</span><span class="p">()</span><span class="nf">.num_threads</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="nf">.build</span><span class="p">()</span><span class="nf">.unwrap</span><span class="p">();</span>
+<span class="k">let</span> <span class="n">ssd_pool</span> <span class="o">=</span> <span class="nn">rayon</span><span class="p">::</span><span class="nn">ThreadPoolBuilder</span><span class="p">::</span><span class="nf">new</span><span class="p">()</span><span class="nf">.num_threads</span><span class="p">(</span><span class="mi">16</span><span class="p">)</span><span class="nf">.build</span><span class="p">()</span><span class="nf">.unwrap</span><span class="p">();</span> 
+
+<span class="k">let</span> <span class="n">files</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;</span><span class="nn">std</span><span class="p">::</span><span class="nn">path</span><span class="p">::</span><span class="n">PathBuf</span><span class="o">&gt;</span> <span class="o">=</span> <span class="o">...</span>
+<span class="k">let</span> <span class="p">(</span><span class="n">tx</span><span class="p">,</span> <span class="n">rx</span><span class="p">)</span> <span class="o">=</span> <span class="nn">std</span><span class="p">::</span><span class="nn">sync</span><span class="p">::</span><span class="nn">mpsc</span><span class="p">::</span><span class="nf">channel</span><span class="p">();</span>
+<span class="k">for</span> <span class="n">f</span> <span class="n">in</span> <span class="n">files</span><span class="nf">.into_iter</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">let</span> <span class="n">tx</span> <span class="o">=</span> <span class="n">tx</span><span class="nf">.clone</span><span class="p">();</span>  
+    <span class="k">let</span> <span class="n">pool</span> <span class="o">=</span> <span class="k">if</span> <span class="nf">is_on_ssd</span><span class="p">(</span><span class="o">&amp;</span><span class="n">f</span><span class="p">)</span> <span class="p">{</span> 
+        <span class="o">&amp;</span><span class="n">ssd_pool</span> 
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span> 
+        <span class="o">&amp;</span><span class="n">hdd_pool</span> 
+    <span class="p">};</span>
+    <span class="n">pool</span><span class="nf">.spawn</span><span class="p">(</span><span class="k">move</span> <span class="p">||</span> <span class="p">{</span> 
+        <span class="n">tx</span><span class="nf">.send</span><span class="p">(</span><span class="nf">compute_hash</span><span class="p">(</span><span class="n">f</span><span class="p">))</span><span class="nf">.unwrap</span><span class="p">();</span> 
+    <span class="p">});</span>
+<span class="p">}</span>
+<span class="k">drop</span><span class="p">(</span><span class="n">tx</span><span class="p">);</span> 
+<span class="k">let</span> <span class="n">hashes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;</span><span class="n">FileHash</span><span class="o">&gt;</span> <span class="o">=</span> <span class="n">rx</span><span class="nf">.into_iter</span><span class="p">()</span><span class="nf">.collect</span><span class="p">();</span> 
+</code></pre></div></div>
+
+<p>The implementation of <code class="language-plaintext highlighter-rouge">is_on_ssd</code> is left as an exercise for the reader ;)</p>
+
+<h1 id="scopes">Scopes</h1>
+<p>Unfortunately <code class="language-plaintext highlighter-rouge">ThreadPool.spawn()</code> method requires that the lambda passed to it has a 
+<code class="language-plaintext highlighter-rouge">'static</code> lifetime, which means it must not borrow any data other than global. 
+The examples above work only because we pass all the input data by <code class="language-plaintext highlighter-rouge">move</code>, so the lambda
+does not close over anything outside and the <code class="language-plaintext highlighter-rouge">'static</code> constraint is satisfied.</p>
+
+<p>Of course the real world is much more complex, and, in my program actually the spawned task<br />
+needed to borrow the local context, which holds some common stuff like configuration or logger.</p>
+
+<p>Referencing any outside variable from inside of <code class="language-plaintext highlighter-rouge">spawn</code> lambda does not compile:</p>
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">logger</span><span class="p">:</span> <span class="n">Log</span> <span class="o">=</span> <span class="nn">Log</span><span class="p">::</span><span class="nf">new</span><span class="p">();</span>
+<span class="k">let</span> <span class="n">logger</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">logger</span><span class="p">;</span>
+<span class="k">for</span> <span class="n">f</span> <span class="n">in</span> <span class="n">files</span><span class="nf">.into_iter</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">let</span> <span class="n">tx</span> <span class="o">=</span> <span class="n">tx</span><span class="nf">.clone</span><span class="p">();</span>
+    <span class="n">pool</span><span class="nf">.spawn</span><span class="p">(</span><span class="k">move</span> <span class="p">||</span> <span class="p">{</span>
+        <span class="n">logger</span><span class="nf">.println</span><span class="p">(</span><span class="nd">format!</span><span class="p">(</span><span class="s">"Computing hash of: {}"</span><span class="p">,</span> <span class="n">f</span><span class="nf">.display</span><span class="p">()));</span>
+        <span class="n">tx</span><span class="nf">.send</span><span class="p">(</span><span class="nf">compute_hash</span><span class="p">(</span><span class="n">f</span><span class="p">))</span><span class="nf">.unwrap</span><span class="p">();</span>
+    <span class="p">});</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<pre>
+error[E0597]: `logger` does not live long enough
+  --&gt; src/pools.rs:13:18
+   |
+13 |       let logger = &logger;
+   |                    ^^^^^^^ borrowed value does not live long enough
+...
+16 | /         pool.spawn(move || {
+17 | |             logger.println(format!("Computing hash of: {}", f.display()));
+18 | |             tx.send(f).unwrap();
+19 | |         });
+   | |__________- argument requires that `logger` is borrowed for `'static`
+...
+22 |   }
+   |   - `logger` dropped here while still borrowed
+
+</pre>
+
+<p>The compiler can’t see that all the tasks we spawned must finish before we leave the scope
+where <code class="language-plaintext highlighter-rouge">logger</code> is valid. This is where Rayon scopes are coming to rescue us.</p>
+
+<p>Instead of spawning tasks directly on the thread pool struct, we first need to create a scope 
+object by calling <code class="language-plaintext highlighter-rouge">scope</code> function. The scope is guaranteed to exit only after all tasks launched 
+inside it finished. This essentially allows the tasks inside the scope to access variables that live 
+at least as long as the scope:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="p">(</span><span class="n">tx</span><span class="p">,</span> <span class="n">rx</span><span class="p">)</span> <span class="o">=</span> <span class="nn">std</span><span class="p">::</span><span class="nn">sync</span><span class="p">::</span><span class="nn">mpsc</span><span class="p">::</span><span class="nf">channel</span><span class="p">();</span>
+<span class="k">let</span> <span class="n">logger</span><span class="p">:</span> <span class="o">&amp;</span><span class="n">Log</span> <span class="o">=</span> <span class="o">...</span><span class="p">;</span>
+<span class="n">pool</span><span class="nf">.scope</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="n">f</span> <span class="n">in</span> <span class="n">files</span><span class="nf">.into_iter</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">let</span> <span class="n">tx</span> <span class="o">=</span> <span class="n">tx</span><span class="nf">.clone</span><span class="p">();</span>
+        <span class="n">s</span><span class="nf">.spawn</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span>
+            <span class="n">logger</span><span class="nf">.println</span><span class="p">(</span><span class="nd">format!</span><span class="p">(</span><span class="s">"Computing hash of: {}"</span><span class="p">,</span> <span class="n">f</span><span class="nf">.display</span><span class="p">()));</span>  <span class="c">// ok</span>
+            <span class="n">tx</span><span class="nf">.send</span><span class="p">(</span><span class="n">f</span><span class="p">)</span><span class="nf">.unwrap</span><span class="p">();</span>
+        <span class="p">});</span>
+    <span class="p">}</span>
+<span class="p">});</span>
+</code></pre></div></div>
+
+<p>What about multiple thread pools? 
+A single <code class="language-plaintext highlighter-rouge">Scope</code> in Rayon is always associated with a single <code class="language-plaintext highlighter-rouge">ThreadPool</code>. 
+Therefore, if we need multiple thread pools, then we need multiple scopes, active at the same time.
+Fortunately, scopes can be nested:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="p">(</span><span class="n">tx</span><span class="p">,</span> <span class="n">rx</span><span class="p">)</span> <span class="o">=</span> <span class="nn">std</span><span class="p">::</span><span class="nn">sync</span><span class="p">::</span><span class="nn">mpsc</span><span class="p">::</span><span class="nf">channel</span><span class="p">();</span>
+<span class="k">let</span> <span class="n">logger</span><span class="p">:</span> <span class="o">&amp;</span><span class="n">Log</span> <span class="o">=</span> <span class="o">...</span><span class="p">;</span>
+<span class="n">hdd_pool</span><span class="nf">.scope</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">hdd_scope</span><span class="p">|</span> <span class="p">{</span>
+    <span class="n">ssd_pool</span><span class="nf">.scope</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">ssd_scope</span><span class="p">|</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="n">f</span> <span class="n">in</span> <span class="n">files</span><span class="nf">.into_iter</span><span class="p">()</span> <span class="p">{</span>
+            <span class="k">let</span> <span class="n">tx</span> <span class="o">=</span> <span class="n">tx</span><span class="nf">.clone</span><span class="p">();</span>
+            <span class="k">if</span> <span class="nf">is_on_ssd</span><span class="p">(</span><span class="o">&amp;</span><span class="n">f</span><span class="p">)</span> <span class="p">{</span>
+              <span class="n">ssd_scope</span><span class="nf">.spawn</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span> <span class="o">...</span> <span class="p">});</span>          
+            <span class="p">}</span> <span class="k">else</span> <span class="p">{</span> 
+              <span class="n">hdd_scope</span><span class="nf">.spawn</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span> <span class="o">...</span> <span class="p">});</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">});</span>
+<span class="p">});</span>
+</code></pre></div></div>
+
+<h2 id="dynamic-number-of-thread-pools">Dynamic Number of Thread Pools</h2>
+<p>With only two pools, nesting doesn’t look bad, but in my program I needed more than two pools – 
+one per each physical device. And even worse, I didn’t know the number of them statically at compile time.</p>
+
+<p>At this point I wanted to abstract out the process of creating nested scopes in a way it doesn’t pollute the 
+logic of the program. I came up with the following function idea:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">pub</span> <span class="k">fn</span> <span class="n">multi_scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="p">[</span><span class="o">&amp;</span><span class="n">ThreadPool</span><span class="p">],</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="k">for</span><span class="o">&lt;</span><span class="nv">'s</span><span class="o">&gt;</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="p">[</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">])</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nv">'scope</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span>
+</code></pre></div></div>
+
+<p>This takes an array of <code class="language-plaintext highlighter-rouge">ThreadPool</code> references, constructs a <code class="language-plaintext highlighter-rouge">Scope</code> for each <code class="language-plaintext highlighter-rouge">ThreadPool</code> 
+and executes a user-defined operation (typically passed as a lambda) inside all of these scopes.
+The operation receives a list of references to <code class="language-plaintext highlighter-rouge">Scope</code> so it can spawn tasks on desired <code class="language-plaintext highlighter-rouge">Scope</code> associated
+with the given <code class="language-plaintext highlighter-rouge">ThreadPool</code>. The usage is quite straightforward and very similar to the built-in <code class="language-plaintext highlighter-rouge">scope</code>:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">use</span> <span class="nn">rayon</span><span class="p">::</span><span class="n">ThreadPoolBuilder</span><span class="p">;</span>
+
+<span class="k">let</span> <span class="n">hdd_pool</span> <span class="o">=</span> <span class="nn">rayon</span><span class="p">::</span><span class="nn">ThreadPoolBuilder</span><span class="p">::</span><span class="nf">new</span><span class="p">()</span><span class="nf">.num_threads</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="nf">.build</span><span class="p">()</span><span class="nf">.unwrap</span><span class="p">();</span>
+<span class="k">let</span> <span class="n">ssd_pool</span> <span class="o">=</span> <span class="nn">rayon</span><span class="p">::</span><span class="nn">ThreadPoolBuilder</span><span class="p">::</span><span class="nf">new</span><span class="p">()</span><span class="nf">.num_threads</span><span class="p">(</span><span class="mi">16</span><span class="p">)</span><span class="nf">.build</span><span class="p">()</span><span class="nf">.unwrap</span><span class="p">();</span> 
+<span class="k">let</span> <span class="n">pools</span> <span class="o">=</span> <span class="p">[</span><span class="o">&amp;</span><span class="n">hdd_pool</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">ssd_pool</span><span class="p">];</span> <span class="c">// this could be constructed dynamically in real-world code</span>
+
+<span class="k">let</span> <span class="n">common</span> <span class="o">=</span> <span class="nd">vec!</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">];</span> <span class="c">// common data</span>
+<span class="nf">multi_scope</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pools</span><span class="p">,</span> <span class="p">|</span><span class="n">scopes</span><span class="p">|</span> <span class="p">{</span>
+    <span class="n">scopes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="nf">.spawn</span><span class="p">(|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span> <span class="cm">/* execute on hdd_pool, can use &amp;common */</span> <span class="p">});</span>
+    <span class="n">scopes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="nf">.spawn</span><span class="p">(|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span> <span class="cm">/* execute on ssd_pool, can use &amp;common */</span> <span class="p">});</span>
+<span class="p">});</span>
+</code></pre></div></div>
+
+<p>How to implement <code class="language-plaintext highlighter-rouge">multi_scope</code>? There is no way to obtain a <code class="language-plaintext highlighter-rouge">Scope</code> value directly from Rayon.
+The only way we can get a reference to a <code class="language-plaintext highlighter-rouge">Scope</code> is inside the lambda passed to <code class="language-plaintext highlighter-rouge">scope</code>.
+So if we need multiple scopes active at the same time, we must nest scopes in each other. 
+This sounds like a recursion.</p>
+
+<h2 id="my-code-is-correct-but-the-borrow-checker-disagrees">My Code Is Correct, But The Borrow Checker Disagrees</h2>
+<p>My initial take looked like this:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">pub</span> <span class="k">fn</span> <span class="n">multi_scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="p">[</span><span class="o">&amp;</span><span class="n">ThreadPool</span><span class="p">],</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="k">for</span><span class="o">&lt;</span><span class="nv">'s</span><span class="o">&gt;</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="p">[</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">])</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nv">'scope</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="nf">nest</span><span class="p">(</span><span class="n">pools</span><span class="p">,</span> <span class="nn">Vec</span><span class="p">::</span><span class="nf">with_capacity</span><span class="p">(</span><span class="n">pools</span><span class="nf">.len</span><span class="p">()),</span> <span class="n">op</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="k">fn</span> <span class="n">nest</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="p">[</span><span class="o">&amp;</span><span class="n">ThreadPool</span><span class="p">],</span> <span class="n">scopes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;&amp;</span><span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;&gt;</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="k">for</span><span class="o">&lt;</span><span class="nv">'s</span><span class="o">&gt;</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="p">[</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">])</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nv">'scope</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="o">!</span><span class="n">pools</span><span class="nf">.is_empty</span><span class="p">()</span> <span class="p">{</span>
+        <span class="n">pools</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="nf">.scope</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span>
+            <span class="k">let</span> <span class="k">mut</span> <span class="n">scopes</span> <span class="o">=</span> <span class="n">scopes</span><span class="p">;</span>
+            <span class="n">scopes</span><span class="nf">.push</span><span class="p">(</span><span class="n">s</span><span class="p">);</span>
+            <span class="nf">nest</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pools</span><span class="p">[</span><span class="mi">1</span><span class="o">..</span><span class="p">],</span> <span class="n">scopes</span><span class="p">,</span> <span class="n">op</span><span class="p">)</span>
+        <span class="p">})</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="p">(</span><span class="n">op</span><span class="p">)(</span><span class="o">&amp;</span><span class="n">scopes</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>An additional function <code class="language-plaintext highlighter-rouge">nest</code> creates one new <code class="language-plaintext highlighter-rouge">Scope</code> and pushes it into the <code class="language-plaintext highlighter-rouge">scopes</code> vector, then it calls itself
+recursively until it runs out of <code class="language-plaintext highlighter-rouge">ThreadPool</code> values. Finally it calls the user operation <code class="language-plaintext highlighter-rouge">op</code> 
+passing the created <code class="language-plaintext highlighter-rouge">scopes</code> vector to it.</p>
+
+<p>To my surprise that didn’t compile. Oh well!</p>
+<pre>
+error[E0621]: explicit lifetime required in the type of `scopes`
+  --&gt; src/pools.rs:42:25
+   |
+34 | fn nest&lt;'scope, OP, R&gt;(pools: &amp;[&amp;ThreadPool], scopes: Vec&lt;&amp;Scope&lt;'scope&gt;&gt;, op: OP) -&gt; R
+   |                                                       ------------------- help: add explicit lifetime `'scope` to the type of `scopes`: `std::vec::Vec&lt;&amp;'scope rayon_core::scope::Scope&lt;'scope&gt;&gt;`
+...
+42 |             scopes.push(s);
+   |                         ^ lifetime `'scope` required
+
+</pre>
+
+<p>Wait, there is a hint here. As usual with Rust coding, let’s apply the hint the compiler gave to us:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">fn</span> <span class="n">nest</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="p">[</span><span class="o">&amp;</span><span class="n">ThreadPool</span><span class="p">],</span> <span class="n">scopes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;&amp;</span><span class="nv">'scope</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;&gt;</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+</code></pre></div></div>
+
+<p>But this made it only worse:</p>
+<pre>
+error[E0495]: cannot infer an appropriate lifetime due to conflicting requirements
+  --&gt; src/pools.rs:41:33
+   |
+41 |             let mut scopes: Vec&lt;&amp;Scope&lt;'scope&gt;&gt; = scopes;
+   |                                 ^
+   |
+note: first, the lifetime cannot outlive the anonymous lifetime #2 defined on the body at 40:24...
+  --&gt; src/pools.rs:40:24
+   |
+40 |           pools[0].scope(move |s| {
+   |  ________________________^
+41 | |             let mut scopes: Vec&lt;&amp;Scope&lt;'scope&gt;&gt; = scopes;
+42 | |             scopes.push(s);
+43 | |             nest(&amp;pools[1..], scopes, op)
+44 | |         })
+   | |_________^
+note: ...so that reference does not outlive borrowed content
+  --&gt; src/pools.rs:42:25
+   |
+42 |             scopes.push(s);
+   |                         ^
+note: but, the lifetime must be valid for the lifetime `'scope` as defined on the function body at 34:9...
+  --&gt; src/pools.rs:34:9
+   |
+34 | fn nest&lt;'scope, OP, R&gt;(pools: &amp;[&amp;ThreadPool], scopes: Vec&lt;&amp;'scope Scope&lt;'scope&gt;&gt;, op: OP) -&gt; R
+   |         ^^^^^^
+note: ...so that the expression is assignable
+  --&gt; src/pools.rs:43:31
+   |
+43 |             nest(&amp;pools[1..], scopes, op)
+   |                               ^^^^^^
+   = note: expected `std::vec::Vec&lt;&amp;rayon_core::scope::Scope&lt;'_&gt;&gt;`
+              found `std::vec::Vec&lt;&amp;rayon_core::scope::Scope&lt;'scope&gt;&gt;`
+</pre>
+
+<p>What happens if we try to “help” the compiler with inferring the <code class="language-plaintext highlighter-rouge">scopes</code> vector lifetime and require all references to be valid for at least <code class="language-plaintext highlighter-rouge">'scope</code>?</p>
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">fn</span> <span class="n">nest</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="nv">'scope</span> <span class="p">[</span><span class="o">&amp;</span><span class="nv">'scope</span> <span class="n">ThreadPool</span><span class="p">],</span> <span class="n">scopes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;&amp;</span><span class="nv">'scope</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;&gt;</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="k">for</span><span class="o">&lt;</span><span class="nv">'s</span><span class="o">&gt;</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="p">[</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">])</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nv">'scope</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="o">!</span><span class="n">pools</span><span class="nf">.is_empty</span><span class="p">()</span> <span class="p">{</span>
+        <span class="n">pools</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="nf">.scope</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span>
+            <span class="k">let</span> <span class="k">mut</span> <span class="n">scopes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;&amp;</span><span class="nv">'scope</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;&gt;</span> <span class="o">=</span> <span class="n">scopes</span><span class="p">;</span>
+            <span class="n">scopes</span><span class="nf">.push</span><span class="p">(</span><span class="n">s</span><span class="p">);</span>
+            <span class="nf">nest</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pools</span><span class="p">[</span><span class="mi">1</span><span class="o">..</span><span class="p">],</span> <span class="n">scopes</span><span class="p">,</span> <span class="n">op</span><span class="p">)</span>
+        <span class="p">})</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="p">(</span><span class="n">op</span><span class="p">)(</span><span class="o">&amp;</span><span class="n">scopes</span><span class="p">)</span>
+    <span class="p">}</span>
+
+</code></pre></div></div>
+<pre>
+error[E0312]: lifetime of reference outlives lifetime of borrowed content...
+  --&gt; src/pools.rs:42:25
+   |
+42 |             scopes.push(s);
+   |                         ^
+   |
+note: ...the reference is valid for the lifetime `'scope` as defined on the function body at 34:9...
+  --&gt; src/pools.rs:34:9
+   |
+34 | fn nest&lt;'scope, OP, R&gt;(pools: &amp;'scope [&amp;'scope ThreadPool], scopes: Vec&lt;&amp;'scope Scope&lt;'scope&gt;&gt;, op: OP) -&gt; R
+   |         ^^^^^^
+note: ...but the borrowed content is only valid for the anonymous lifetime #2 defined on the body at 40:24
+  --&gt; src/pools.rs:40:24
+   |
+40 |           pools[0].scope(move |s| {
+   |  ________________________^
+41 | |             let mut scopes: Vec&lt;&amp;'scope Scope&lt;'scope&gt;&gt; = scopes;
+42 | |             scopes.push(s);
+43 | |             nest(&amp;pools[1..], scopes, op)
+44 | |         })
+   | |_________^
+</pre>
+
+<p>Looks like we can’t really add the new scope to the vector, because now the vector type requires 
+that the references stored in it live for the time of the outermost scope. Rust collections obviously cannot hold
+references to data that lives shorter than the collection itself, therefore <code class="language-plaintext highlighter-rouge">'scope</code> must not be shorter than
+the lifetime of the vector created at the outermost recursion level.</p>
+
+<h2 id="the-borrow-checker-doesnt-give-up-easily">The Borrow Checker Doesn’t Give Up Easily</h2>
+
+<p>Another idea I tried was to decouple the lifetime of the references inside the vector from the actual <code class="language-plaintext highlighter-rouge">'scope</code> by introducing
+a new lifetime <code class="language-plaintext highlighter-rouge">'vec</code>, hoping that the vector would narrow down the lifetime of the innermost scope inserted into it 
+(which should be ok because we will lend the vector only to the innermost scope at the end):</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">fn</span> <span class="n">nest</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="nv">'vec</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="p">[</span><span class="o">&amp;</span><span class="n">ThreadPool</span><span class="p">],</span> <span class="n">scopes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;&amp;</span><span class="nv">'vec</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;&gt;</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="k">for</span><span class="o">&lt;</span><span class="nv">'s</span><span class="o">&gt;</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="p">[</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">])</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nv">'scope</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="o">!</span><span class="n">pools</span><span class="nf">.is_empty</span><span class="p">()</span> <span class="p">{</span>
+        <span class="n">pools</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="nf">.scope</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span>
+            <span class="k">let</span> <span class="k">mut</span> <span class="n">scopes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;&amp;</span><span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;&gt;</span> <span class="o">=</span> <span class="n">scopes</span><span class="p">;</span>
+            <span class="n">scopes</span><span class="nf">.push</span><span class="p">(</span><span class="n">s</span><span class="p">);</span>
+            <span class="nf">nest</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pools</span><span class="p">[</span><span class="mi">1</span><span class="o">..</span><span class="p">],</span> <span class="n">scopes</span><span class="p">,</span> <span class="n">op</span><span class="p">)</span>
+        <span class="p">})</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="p">(</span><span class="n">op</span><span class="p">)(</span><span class="o">&amp;</span><span class="n">scopes</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>Almost worked, but still one more error to go…</p>
+<pre>
+error[E0623]: lifetime mismatch
+  --&gt; src/pools.rs:42:25
+   |
+34 | fn nest&lt;'scope, 'vec, OP, R&gt;(pools: &amp;[&amp;ThreadPool], scopes: Vec&lt;&amp;'vec Scope&lt;'scope&gt;&gt;, op: OP) -&gt; R
+   |                                                                 -------------------
+   |                                                                 |
+   |                                                                 these two types are declared with different lifetimes...
+...
+42 |             scopes.push(s);
+   |                         ^ ...but data from `scopes` flows into `scopes` here
+</pre>
+
+<p>This time the error message is not helpful at all. Why is the compiler saying “these two types” while pointing to a single type?
+This baffled me for a while, but eventually I realized this must have something to do with <code class="language-plaintext highlighter-rouge">'vec</code> being inferred differently 
+for the next recursion level than <code class="language-plaintext highlighter-rouge">'vec</code> on the current level. And what does it mean “<code class="language-plaintext highlighter-rouge">scopes</code> flows into <code class="language-plaintext highlighter-rouge">scopes</code>”?</p>
+
+<h2 id="blocked-by-invariance">Blocked By Invariance</h2>
+
+<p>I started experimenting a bit by removing some code and I realized these two logically incorrect versions compile just fine:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">fn</span> <span class="n">nest</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="nv">'vec</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="nv">'scope</span><span class="p">[</span><span class="o">&amp;</span><span class="nv">'scope</span> <span class="n">ThreadPool</span><span class="p">],</span> <span class="n">scopes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;&amp;</span><span class="nv">'vec</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;&gt;</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="k">for</span><span class="o">&lt;</span><span class="nv">'s</span><span class="o">&gt;</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="p">[</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">])</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nv">'scope</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="o">!</span><span class="n">pools</span><span class="nf">.is_empty</span><span class="p">()</span> <span class="p">{</span>
+        <span class="n">pools</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="nf">.scope</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span>
+            <span class="k">let</span> <span class="k">mut</span> <span class="n">scopes</span> <span class="o">=</span> <span class="nn">Vec</span><span class="p">::</span><span class="nf">new</span><span class="p">();</span>    <span class="c">// &lt;--- look here</span>
+            <span class="n">scopes</span><span class="nf">.push</span><span class="p">(</span><span class="n">s</span><span class="p">);</span>                 <span class="c">// &lt;--- look here</span>
+            <span class="nf">nest</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pools</span><span class="p">[</span><span class="mi">1</span><span class="o">..</span><span class="p">],</span> <span class="n">scopes</span><span class="p">,</span> <span class="n">op</span><span class="p">)</span>
+        <span class="p">})</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="p">(</span><span class="n">op</span><span class="p">)(</span><span class="o">&amp;</span><span class="n">scopes</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">fn</span> <span class="n">nest</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="nv">'vec</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="nv">'scope</span><span class="p">[</span><span class="o">&amp;</span><span class="nv">'scope</span> <span class="n">ThreadPool</span><span class="p">],</span> <span class="n">scopes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;&amp;</span><span class="nv">'vec</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;&gt;</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="k">for</span><span class="o">&lt;</span><span class="nv">'s</span><span class="o">&gt;</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="p">[</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">])</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nv">'scope</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="o">!</span><span class="n">pools</span><span class="nf">.is_empty</span><span class="p">()</span> <span class="p">{</span>
+        <span class="n">pools</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="nf">.scope</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span>
+            <span class="k">let</span> <span class="k">mut</span> <span class="n">scopes</span> <span class="o">=</span> <span class="n">scopes</span><span class="p">;</span>        <span class="c">// &lt;--- look here</span>
+            <span class="nf">nest</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pools</span><span class="p">[</span><span class="mi">1</span><span class="o">..</span><span class="p">],</span> <span class="n">scopes</span><span class="p">,</span> <span class="n">op</span><span class="p">)</span>
+        <span class="p">})</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="p">(</span><span class="n">op</span><span class="p">)(</span><span class="o">&amp;</span><span class="n">scopes</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>So I can either add the newly created scope to my vector as the only item, or I can pass the existing vector as is without inserting the new scope!
+But I can’t do both! This problem typically happens when you try to add values of different incompatible types to a collection, but here I’m adding 
+values of the same type, so I should be fine…</p>
+
+<p>Unfortunately, Rayon’s <code class="language-plaintext highlighter-rouge">Scope</code> struct is <em>invariant</em> over its lifetime parameter, and the lifetime is obviously a part of the type. 
+In this case the compiler won’t coerce one scope to another, e.g. by shortening the lifetime of the outer scope to match the lifetime of the inner scope,
+nor by extending the lifetime of the inner scope to match the outer scope. 
+This means we can’t put references to two scopes into a single vector, at least not without changing the 
+source code of Rayon or changing how the type system works in Rust. What a bummer!</p>
+
+<h2 id="going-unsafe">Going Unsafe</h2>
+
+<p>Fortunately, the tiny difference in scope lifetimes caused by nesting is all internal to the <code class="language-plaintext highlighter-rouge">nest</code> function and is never observable by 
+the client’s code. From the outside, we can safely assume all scopes were created with the same lifetime – 
+they are all created by <code class="language-plaintext highlighter-rouge">nest</code> and all dropped by it together.</p>
+
+<p>This is the moment where Rust’s <code class="language-plaintext highlighter-rouge">unsafe</code> comes to the rescue. 
+We can “cheat” a bit, and let the compiler adjust our scope lifetimes so they match and can be stored in a single vector:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">unsafe</span> <span class="k">fn</span> <span class="n">adjust_lifetime</span><span class="o">&lt;</span><span class="nv">'s</span><span class="p">,</span> <span class="nv">'a</span><span class="p">,</span> <span class="nv">'b</span><span class="o">&gt;</span><span class="p">(</span><span class="n">scope</span><span class="p">:</span> <span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'a</span><span class="o">&gt;</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'b</span><span class="o">&gt;</span> <span class="p">{</span>
+    <span class="nn">std</span><span class="p">::</span><span class="nn">mem</span><span class="p">::</span><span class="nn">transmute</span><span class="p">::</span><span class="o">&lt;&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'a</span><span class="o">&gt;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'b</span><span class="o">&gt;&gt;</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="k">fn</span> <span class="n">nest</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="nv">'vec</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="nv">'scope</span><span class="p">[</span><span class="o">&amp;</span><span class="nv">'scope</span> <span class="n">ThreadPool</span><span class="p">],</span> <span class="n">scopes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;&amp;</span><span class="nv">'vec</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;&gt;</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="k">for</span><span class="o">&lt;</span><span class="nv">'s</span><span class="o">&gt;</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="p">[</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">])</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nv">'scope</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="o">!</span><span class="n">pools</span><span class="nf">.is_empty</span><span class="p">()</span> <span class="p">{</span>
+        <span class="n">pools</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="nf">.scope</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span>
+            <span class="k">let</span> <span class="k">mut</span> <span class="n">scopes</span> <span class="o">=</span> <span class="n">scopes</span><span class="p">;</span>
+            <span class="n">scopes</span><span class="nf">.push</span><span class="p">(</span><span class="k">unsafe</span> <span class="p">{</span> <span class="nf">adjust_lifetime</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="p">});</span>
+            <span class="nf">nest</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pools</span><span class="p">[</span><span class="mi">1</span><span class="o">..</span><span class="p">],</span> <span class="n">scopes</span><span class="p">,</span> <span class="n">op</span><span class="p">)</span>
+        <span class="p">})</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="p">(</span><span class="n">op</span><span class="p">)(</span><span class="o">&amp;</span><span class="n">scopes</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>Actually some lifetime annotations can be dropped and the compiler is still happy:</p>
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">unsafe</span> <span class="k">fn</span> <span class="n">adjust_lifetime</span><span class="o">&lt;</span><span class="nv">'s</span><span class="p">,</span> <span class="nv">'a</span><span class="p">,</span> <span class="nv">'b</span><span class="o">&gt;</span><span class="p">(</span><span class="n">scope</span><span class="p">:</span> <span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'a</span><span class="o">&gt;</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'b</span><span class="o">&gt;</span> <span class="p">{</span>
+    <span class="nn">std</span><span class="p">::</span><span class="nn">mem</span><span class="p">::</span><span class="nn">transmute</span><span class="p">::</span><span class="o">&lt;&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'a</span><span class="o">&gt;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'b</span><span class="o">&gt;&gt;</span><span class="p">(</span><span class="n">scope</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="k">fn</span> <span class="n">nest</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="p">[</span><span class="o">&amp;</span><span class="n">ThreadPool</span><span class="p">],</span> <span class="n">scopes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;&amp;</span><span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;&gt;</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="k">for</span><span class="o">&lt;</span><span class="nv">'s</span><span class="o">&gt;</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="p">[</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">])</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nv">'scope</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="o">!</span><span class="n">pools</span><span class="nf">.is_empty</span><span class="p">()</span> <span class="p">{</span>
+        <span class="n">pools</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="nf">.scope</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span>
+            <span class="k">let</span> <span class="k">mut</span> <span class="n">scopes</span> <span class="o">=</span> <span class="n">scopes</span><span class="p">;</span>
+            <span class="n">scopes</span><span class="nf">.push</span><span class="p">(</span><span class="k">unsafe</span> <span class="p">{</span> <span class="nf">adjust_lifetime</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="p">});</span>
+            <span class="nf">nest</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pools</span><span class="p">[</span><span class="mi">1</span><span class="o">..</span><span class="p">],</span> <span class="n">scopes</span><span class="p">,</span> <span class="n">op</span><span class="p">)</span>
+        <span class="p">})</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="p">(</span><span class="n">op</span><span class="p">)(</span><span class="o">&amp;</span><span class="n">scopes</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="update-getting-rid-of-unsafe">Update: Getting Rid of Unsafe</h2>
+<p>Fortunately Rayon 1.4.0 changed its <code class="language-plaintext highlighter-rouge">scope</code> signature a bit and now it is possible to completely avoid <code class="language-plaintext highlighter-rouge">unsafe</code>.</p>
+
+<p>Rayon 1.3.0 defines <code class="language-plaintext highlighter-rouge">scope</code> function as follows:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">/// Creates a scope that executes within this thread-pool.</span>
+<span class="c">/// Equivalent to `self.install(|| scope(...))`.</span>
+<span class="c">///</span>
+<span class="c">/// See also: [the `scope()` function][scope].</span>
+<span class="c">///</span>
+<span class="c">/// [scope]: fn.scope.html</span>
+<span class="k">pub</span> <span class="k">fn</span> <span class="n">scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="o">&amp;</span><span class="k">self</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="k">for</span><span class="o">&lt;</span><span class="nv">'s</span><span class="o">&gt;</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="nv">'s</span> <span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nv">'scope</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="k">self</span><span class="nf">.install</span><span class="p">(||</span> <span class="nf">scope</span><span class="p">(</span><span class="n">op</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>There is an explicit requirement that the passed <code class="language-plaintext highlighter-rouge">op</code> lambda lives for at least as
+long as <code class="language-plaintext highlighter-rouge">'scope</code> therefore <code class="language-plaintext highlighter-rouge">'scope</code> can never be inferred to be wider than the lifetime of <code class="language-plaintext highlighter-rouge">op</code>.</p>
+
+<p>In Rayon 1.4.0 <code class="language-plaintext highlighter-rouge">scope</code> has been changed into:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">/// Creates a scope that executes within this thread-pool.</span>
+<span class="c">/// Equivalent to `self.install(|| scope(...))`.</span>
+<span class="c">///</span>
+<span class="c">/// See also: [the `scope()` function][scope].</span>
+<span class="c">///</span>
+<span class="c">/// [scope]: fn.scope.html</span>
+<span class="k">pub</span> <span class="k">fn</span> <span class="n">scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="o">&amp;</span><span class="k">self</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="k">self</span><span class="nf">.install</span><span class="p">(||</span> <span class="nf">scope</span><span class="p">(</span><span class="n">op</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>Now the <code class="language-plaintext highlighter-rouge">'scope</code> is allowed to be a wider lifetime than the lifetime of a lambda.
+If we nest scopes, they all can get the same <code class="language-plaintext highlighter-rouge">'scope</code> that can hold the outermost 
+lambda. Therefore it is enough to remove the <code class="language-plaintext highlighter-rouge">+ 'scope</code> requirement in our code and drop the
+<code class="language-plaintext highlighter-rouge">adjust_lifetime</code> call:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">use</span> <span class="nn">rayon</span><span class="p">::{</span><span class="n">Scope</span><span class="p">,</span> <span class="n">ThreadPool</span><span class="p">};</span>
+
+<span class="k">fn</span> <span class="n">nest</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="p">[</span><span class="o">&amp;</span><span class="n">ThreadPool</span><span class="p">],</span> <span class="n">scopes</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;&amp;</span><span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;&gt;</span><span class="p">,</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="p">[</span><span class="o">&amp;</span><span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">])</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="k">if</span> <span class="o">!</span><span class="n">pools</span><span class="nf">.is_empty</span><span class="p">()</span> <span class="p">{</span>
+        <span class="n">pools</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="nf">.scope</span><span class="p">(</span><span class="k">move</span> <span class="p">|</span><span class="n">s</span><span class="p">|</span> <span class="p">{</span>
+            <span class="k">let</span> <span class="k">mut</span> <span class="n">scopes</span> <span class="o">=</span> <span class="n">scopes</span><span class="p">;</span>
+            <span class="n">scopes</span><span class="nf">.push</span><span class="p">(</span><span class="n">s</span><span class="p">);</span>
+            <span class="nf">nest</span><span class="p">(</span><span class="o">&amp;</span><span class="n">pools</span><span class="p">[</span><span class="mi">1</span><span class="o">..</span><span class="p">],</span> <span class="n">scopes</span><span class="p">,</span> <span class="n">op</span><span class="p">)</span>
+        <span class="p">})</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="p">(</span><span class="n">op</span><span class="p">)(</span><span class="o">&amp;</span><span class="n">scopes</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c">/// Creates multiple Rayon scopes, one per given `ThreadPool`, around the given lambda `op`.</span>
+<span class="c">/// The purpose of this method is to be able to spawn tasks on multiple thread pools when</span>
+<span class="c">/// the number of thread pools is not known at compile-time. Same as with a single scope,</span>
+<span class="c">/// all tasks spawned by `op` are guaranteed to finish before this call exits, so they</span>
+<span class="c">/// are allowed to access structs from outside of the scope.</span>
+<span class="c">///</span>
+<span class="c">/// # Example</span>
+<span class="c">/// ```</span>
+<span class="c">/// use rayon::ThreadPoolBuilder;</span>
+<span class="c">/// use fclones::pools::multi_scope;</span>
+<span class="c">///</span>
+<span class="c">/// let pool1 = ThreadPoolBuilder::new().build().unwrap();</span>
+<span class="c">/// let pool2 = ThreadPoolBuilder::new().build().unwrap();</span>
+<span class="c">/// let common = vec![0, 1, 2]; // common data, must be Send</span>
+<span class="c">/// multi_scope(&amp;[&amp;pool1, &amp;pool2], |scopes| {</span>
+<span class="c">///     scopes[0].spawn(|_| { /* execute on pool1, can use &amp;common */ });</span>
+<span class="c">///     scopes[1].spawn(|_| { /* execute on pool2, can use &amp;common */ });</span>
+<span class="c">/// });</span>
+<span class="c">/// ```</span>
+<span class="k">pub</span> <span class="k">fn</span> <span class="n">multi_scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="p">,</span> <span class="n">OP</span><span class="p">,</span> <span class="n">R</span><span class="o">&gt;</span><span class="p">(</span><span class="n">pools</span><span class="p">:</span> <span class="o">&amp;</span><span class="p">[</span><span class="o">&amp;</span><span class="n">ThreadPool</span><span class="p">],</span> <span class="n">op</span><span class="p">:</span> <span class="n">OP</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">R</span>
+<span class="k">where</span>
+    <span class="n">OP</span><span class="p">:</span> <span class="nf">FnOnce</span><span class="p">(</span><span class="o">&amp;</span><span class="p">[</span><span class="o">&amp;</span><span class="n">Scope</span><span class="o">&lt;</span><span class="nv">'scope</span><span class="o">&gt;</span><span class="p">])</span> <span class="k">-&gt;</span> <span class="n">R</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+    <span class="n">R</span><span class="p">:</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="nf">nest</span><span class="p">(</span><span class="n">pools</span><span class="p">,</span> <span class="nn">Vec</span><span class="p">::</span><span class="nf">with_capacity</span><span class="p">(</span><span class="n">pools</span><span class="nf">.len</span><span class="p">()),</span> <span class="n">op</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+  
+
+<style>
+#share-buttons { margin-top: 2em; }
+#share-buttons > a {   
+    display: inline-block;
+    vertical-align: baseline;
+}
+#share-buttons > a > svg { 
+    height: 1.2em; 
+    width: 1.2em; 
+    margin-left: .25em; 
+    margin-right: .25em; 
+    fill: gray; 
+    position: relative; 
+    top: .17em; 
+}
+#share-buttons > span { 
+    margin-right: .4em 
+}
+#share-buttons > a:hover {cursor: pointer;}
+#share-buttons > a.facebook:hover > svg {fill: #3B5998;}
+#share-buttons > a.twitter:hover > svg {fill: #55ACEE;}
+#share-buttons > a.linkedin:hover > svg {fill: #0077b5;}
+#share-buttons > a.pinterest:hover > svg {fill: #CB2027;}
+#share-buttons > a.mail:hover > svg {fill: #0077b5; }
+</style>
+
+<div id="share-buttons">
+    <span style="color: gray;">Share on:</span>
+    <a class="facebook" title="Share this on Facebook" href="http://www.facebook.com/share.php?u=/multiple-threadpools-rust/" target="_blank"> 
+        <svg><use xlink:href="/assets/fontawesome/icons.svg#facebook"></use></svg>
+    </a>
+    <a class="twitter" title="Share this on Twitter" href="https://twitter.com/intent/tweet?text=/multiple-threadpools-rust/" target="_blank">
+        <svg><use xlink:href="/assets/fontawesome/icons.svg#twitter"></use></svg>
+    </a>
+    <a class="linkedin" title="Share this on Linkedin" href="https://www.linkedin.com/shareArticle?mini=true&url=/multiple-threadpools-rust/" target="_blank">
+        <svg><use xlink:href="/assets/fontawesome/icons.svg#linkedin"></use></svg>
+    </a>
+    <a class="mail" title="Share this through Email" href="mailto:?&body=/multiple-threadpools-rust/">
+        <svg><use xlink:href="/assets/fontawesome/icons.svg#envelope"></use></svg>
+    </a>
+</div>
+
+  
+    <hr>
+    
+        
+      <div id="disqus_thread"></div>
+      <script src="/assets/disqus/disqusloader.js"></script>
+      <script>        
+        disqusLoader('#disqus_thread', { scriptUrl: "//pkolaczk.disqus.com/embed.js" });
+      </script> 
+    
+    <noscript>Please enable JavaScript to view comments.</noscript>
+  
+</article>
+
+
+  <footer class="related">
+    <div class="previous"><span>Previous Post</span><a href="/disk-parallelism/">Performance Impact of Parallel Disk Access</a></div>
+    <div class="next"><span>Next Post</span><a href="/in-defense-of-switch/">In Defense of a Switch</a></div>
+  </footer>
+
+
+</body>
+</html>

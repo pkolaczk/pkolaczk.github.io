@@ -1,0 +1,67 @@
+@media (min-width: 50em) { @font-face { font-family: 'PT Sans'; src: local("PT Sans"), local("PTSans-Regular"), url("../fonts/PTSans-Regular.woff") format("woff"); font-weight: normal; font-style: normal; } @font-face { font-family: 'PT Sans'; src: local("PT Sans Bold"), local("PTSans-Bold"), url("../fonts/PTSans-Bold.woff") format("woff"); font-weight: bold; font-style: normal; } }
+
+@media (prefers-color-scheme: light) { html { background: #ffffff; color: #1c1d22; } }
+
+@media (prefers-color-scheme: dark) { html { background: #1c1d22; color: #ffffff; } }
+
+html { font-size: 16px; font-size: calc(0.9rem + 0.2vw); }
+
+body { font-family: "PT Sans", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", "Roboto", sans-serif; font-weight: 400; line-height: 1.5; margin: 0; -webkit-text-size-adjust: 100%; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+h1, h2, h3, h4, h5, h6 { font-weight: 600; }
+
+b, strong, th { font-weight: 600; }
+
+a { color: #68f; text-decoration: inherit; }
+
+a:hover { text-decoration: underline; }
+
+header a, footer a { color: inherit; }
+
+header time { color: #8e8e91; }
+
+hr { border: 1px solid rgba(142, 142, 145, 0.3); margin: 2em 0; }
+
+article:not(:last-child) { border-bottom: 1px solid rgba(142, 142, 145, 0.12); }
+
+blockquote { background: rgba(142, 142, 145, 0.06); border-left: 3px solid rgba(142, 142, 145, 0.9); padding: 1px 1.5em; opacity: .75; }
+
+blockquote, figure { margin: 1em 0; }
+
+img, li { margin: .5em 0; }
+
+img { border-radius: 2px; max-width: 100%; height: auto; }
+
+table { display: inline-block; max-width: 100%; overflow-y: scroll; border-spacing: 1px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(142, 142, 145, 0.12) inset; }
+
+@media (min-width: 50em) { table { display: table; width: 100%; } }
+
+th, td { padding: .5em 1em; box-shadow: 0 0 0 1px rgba(142, 142, 145, 0.12); }
+
+tr:hover, tr:nth-child(odd) td { background: rgba(142, 142, 145, 0.04); }
+
+pre { background: rgba(142, 142, 145, 0.12); border-radius: 2px; font-size: 0.72em; margin: 2em 0; padding: .8em 1em; overflow-x: auto; }
+
+:not(pre) > code { font-size: .8em; background: rgba(142, 142, 145, 0.15); opacity: .7; border-radius: 2px; margin: 0 .1em; padding: .2em .4em; }
+
+body > header, body > footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+
+article header { margin-bottom: 1.5em; }
+
+article header h1 { font-size: 1.8em; margin: 0 0 .1em; }
+
+h1 { margin-top: 1em; }
+
+h2 { font-size: 1.3em; margin-top: 1em; margin-bottom: 0; }
+
+nav { margin: .5em -.8em; }
+
+nav a { margin: .5em .8em; }
+
+body { margin: 2.5em auto; max-width: calc(24% + 24em); }
+
+body > header, body > article, body > footer { margin: 2em 1em; }
+
+article:not(:last-child) { padding-bottom: 2em; }
+
+/*# sourceMappingURL=minimal.css.map */
