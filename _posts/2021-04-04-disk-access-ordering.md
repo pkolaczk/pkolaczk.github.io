@@ -1,6 +1,6 @@
 ---
 layout: post
-title: Ordering Requests to Accelerate Random Disk I/O
+title: Ordering Requests to Accelerate Disk I/O
 comments: true
 tags: performance, optimization, Rust, HDD, spinning drive
 excerpt_separator: <!--more-->
