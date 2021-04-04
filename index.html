@@ -66,7 +66,26 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <article>
     <header>
   
-  <h1><a href="/estimating-benchmark-errors/">Estimating Benchmark Results Uncertainty</a></h1><time datetime="2020-12-28T00:00:00+01:00">December 28, 2020</time>
+  <h1><a href="/disk-access-ordering/">Ordering Requests to Accelerate Random Disk I/O</a></h1><time datetime="2021-04-04T00:00:00+02:00">April 04, 2021</time>
+</header>
+
+    <p>In <a href="/disk-parallelism/">the earlier post</a> I showed how accessing data on
+an SSD in parallel can greatly improve read performance. However, that technique
+is not very effective for data stored on spinning drives. In some cases parallel access
+can even deteriorate performance significantly. Fortunately, there exists a class of optimizations
+that can strongly help with HDDs: request ordering. By requesting data in proper order,
+the disk seek latency can be reduced by an order of magnitude. Since I introduced that 
+optimization in <a href="https://github.com/pkolaczk/fclones">fclones 0.9</a>, <code class="language-plaintext highlighter-rouge">fclones</code> became the 
+fastest duplicate file finder I know of.</p>
+
+
+    <div class="more"><a href="/disk-access-ordering/">read more</a></div>
+  </article>
+
+  <article>
+    <header>
+  
+  <h1><a href="/estimating-benchmark-errors/">Estimating Benchmark Results Uncertainty</a></h1><time datetime="2020-12-22T00:00:00+01:00">December 22, 2020</time>
 </header>
 
     <p>Physicists say that a measurement result given without an error estimate is worthless. This applies

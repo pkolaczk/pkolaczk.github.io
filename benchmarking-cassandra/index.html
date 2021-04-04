@@ -296,10 +296,10 @@ allows it to move on to the next task.</p>
 <span class="k">async</span> <span class="k">fn</span> <span class="nf">main</span><span class="p">()</span> <span class="k">-&gt;</span> <span class="nn">cassandra_cpp</span><span class="p">::</span><span class="n">Result</span><span class="o">&lt;</span><span class="p">()</span><span class="o">&gt;</span> <span class="p">{</span>
     <span class="k">let</span> <span class="k">mut</span> <span class="n">cluster</span> <span class="o">=</span> <span class="nn">Cluster</span><span class="p">::</span><span class="nf">default</span><span class="p">();</span>
     <span class="c">// ... configure cluster</span>
-    <span class="k">let</span> <span class="n">session</span> <span class="o">=</span> <span class="n">cluster</span><span class="nf">.connect_async</span><span class="p">()</span><span class="py">.await</span><span class="o">?</span><span class="p">;</span>
+    <span class="k">let</span> <span class="n">session</span> <span class="o">=</span> <span class="n">cluster</span><span class="nf">.connect_async</span><span class="p">()</span><span class="k">.await</span><span class="o">?</span><span class="p">;</span>
     <span class="k">let</span> <span class="n">statement</span> <span class="o">=</span> <span class="n">session</span>
         <span class="nf">.prepare</span><span class="p">(</span><span class="s">"SELECT * FROM keyspace1.test WHERE pk = ?"</span><span class="p">)</span><span class="o">?</span>
-        <span class="py">.await</span><span class="o">?</span><span class="p">;</span>
+        <span class="k">.await</span><span class="o">?</span><span class="p">;</span>
     <span class="k">let</span> <span class="n">count</span> <span class="o">=</span> <span class="mi">100000</span><span class="p">;</span>
     <span class="k">let</span> <span class="n">start</span> <span class="o">=</span> <span class="nn">Instant</span><span class="p">::</span><span class="nf">now</span><span class="p">();</span>
     <span class="k">for</span> <span class="n">i</span> <span class="n">in</span> <span class="mi">0</span><span class="o">..</span><span class="n">count</span> <span class="p">{</span>
@@ -307,7 +307,7 @@ allows it to move on to the next task.</p>
         <span class="n">statement</span><span class="nf">.bind</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">i</span> <span class="k">as</span> <span class="nb">i64</span><span class="p">)</span><span class="nf">.unwrap</span><span class="p">();</span>
         <span class="nn">tokio</span><span class="p">::</span><span class="nf">spawn</span><span class="p">(</span><span class="k">async</span> <span class="p">{</span>
             <span class="k">let</span> <span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="nf">.execute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">statement</span><span class="p">);</span>
-            <span class="n">result</span><span class="py">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
+            <span class="n">result</span><span class="k">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
         <span class="p">});</span>
     <span class="p">}</span>
     <span class="k">let</span> <span class="n">end</span> <span class="o">=</span> <span class="nn">Instant</span><span class="p">::</span><span class="nf">now</span><span class="p">();</span>
@@ -464,7 +464,7 @@ can send the queries to the local driver’s queue (not even how fast we can pus
 
 <div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code>            <span class="c">// ...</span>
             <span class="k">let</span> <span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="nf">.execute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">statement</span><span class="p">);</span>
-            <span class="n">result</span><span class="py">.await</span><span class="nf">.unwrap</span><span class="p">();</span>        
+            <span class="n">result</span><span class="k">.await</span><span class="nf">.unwrap</span><span class="p">();</span>        
         <span class="p">});</span>
 </code></pre></div></div>
 
@@ -489,7 +489,7 @@ but before computing the end time:</p>
         <span class="nn">tokio</span><span class="p">::</span><span class="nf">spawn</span><span class="p">(</span><span class="k">async</span> <span class="k">move</span> <span class="p">{</span>
             <span class="k">let</span> <span class="n">query_start</span> <span class="o">=</span> <span class="nn">Instant</span><span class="p">::</span><span class="nf">now</span><span class="p">();</span>
             <span class="k">let</span> <span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="nf">.execute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">statement</span><span class="p">);</span>
-            <span class="n">result</span><span class="py">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
+            <span class="n">result</span><span class="k">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
             <span class="k">let</span> <span class="n">query_end</span> <span class="o">=</span> <span class="nn">Instant</span><span class="p">::</span><span class="nf">now</span><span class="p">();</span>
             <span class="k">let</span> <span class="n">duration_micros</span><span class="o">=</span> <span class="p">(</span><span class="n">query_end</span> <span class="o">-</span> <span class="n">query_start</span><span class="p">)</span><span class="nf">.as_micros</span><span class="p">();</span>
             <span class="n">tx</span><span class="nf">.send</span><span class="p">(</span><span class="n">duration_micros</span><span class="p">)</span><span class="nf">.unwrap</span><span class="p">();</span>
@@ -501,7 +501,7 @@ but before computing the end time:</p>
     <span class="k">drop</span><span class="p">(</span><span class="n">tx</span><span class="p">);</span>
 
     <span class="k">let</span> <span class="k">mut</span> <span class="n">successful_count</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
-    <span class="k">while</span> <span class="k">let</span> <span class="nf">Some</span><span class="p">(</span><span class="n">duration</span><span class="p">)</span> <span class="o">=</span> <span class="n">rx</span><span class="nf">.next</span><span class="p">()</span><span class="py">.await</span> <span class="p">{</span>
+    <span class="k">while</span> <span class="k">let</span> <span class="nf">Some</span><span class="p">(</span><span class="n">duration</span><span class="p">)</span> <span class="o">=</span> <span class="n">rx</span><span class="nf">.next</span><span class="p">()</span><span class="k">.await</span> <span class="p">{</span>
         <span class="c">// Here we get a sequence of durations</span>
         <span class="c">// We could use it also to compute e.g. the mean duration or the histogram</span>
         <span class="n">successful_count</span> <span class="o">+=</span> <span class="mi">1</span><span class="p">;</span>
@@ -539,7 +539,7 @@ results.</p>
     <span class="k">let</span> <span class="n">semaphore</span> <span class="o">=</span> <span class="nn">Arc</span><span class="p">::</span><span class="nf">new</span><span class="p">(</span><span class="nn">Semaphore</span><span class="p">::</span><span class="nf">new</span><span class="p">(</span><span class="n">parallelism_limit</span><span class="p">));</span>
     <span class="k">for</span> <span class="n">i</span> <span class="n">in</span> <span class="mi">0</span><span class="o">..</span><span class="n">count</span> <span class="p">{</span>
         <span class="c">// ...</span>
-        <span class="k">let</span> <span class="n">permit</span> <span class="o">=</span> <span class="n">semaphore</span><span class="nf">.clone</span><span class="p">()</span><span class="nf">.acquire_owned</span><span class="p">()</span><span class="py">.await</span><span class="p">;</span>
+        <span class="k">let</span> <span class="n">permit</span> <span class="o">=</span> <span class="n">semaphore</span><span class="nf">.clone</span><span class="p">()</span><span class="nf">.acquire_owned</span><span class="p">()</span><span class="k">.await</span><span class="p">;</span>
         <span class="nn">tokio</span><span class="p">::</span><span class="nf">spawn</span><span class="p">(</span><span class="k">async</span> <span class="k">move</span> <span class="p">{</span>
             <span class="c">// ... run the query and await the result</span>
 

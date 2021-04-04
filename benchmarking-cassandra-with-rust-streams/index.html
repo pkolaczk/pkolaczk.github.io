@@ -91,11 +91,11 @@ Each task sends an async query, records its duration when the results are back, 
 
         <span class="k">let</span> <span class="n">session</span> <span class="o">=</span> <span class="n">session</span><span class="nf">.clone</span><span class="p">();</span>
         <span class="k">let</span> <span class="n">tx</span> <span class="o">=</span> <span class="n">tx</span><span class="nf">.clone</span><span class="p">();</span>
-        <span class="k">let</span> <span class="n">permit</span> <span class="o">=</span> <span class="n">semaphore</span><span class="nf">.clone</span><span class="p">()</span><span class="nf">.acquire_owned</span><span class="p">()</span><span class="py">.await</span><span class="p">;</span>
+        <span class="k">let</span> <span class="n">permit</span> <span class="o">=</span> <span class="n">semaphore</span><span class="nf">.clone</span><span class="p">()</span><span class="nf">.acquire_owned</span><span class="p">()</span><span class="k">.await</span><span class="p">;</span>
         <span class="nn">tokio</span><span class="p">::</span><span class="nf">spawn</span><span class="p">(</span><span class="k">async</span> <span class="k">move</span> <span class="p">{</span>
             <span class="k">let</span> <span class="n">query_start</span> <span class="o">=</span> <span class="nn">Instant</span><span class="p">::</span><span class="nf">now</span><span class="p">();</span>
             <span class="k">let</span> <span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="nf">.execute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">statement</span><span class="p">);</span>
-            <span class="n">result</span><span class="py">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
+            <span class="n">result</span><span class="k">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
             <span class="k">let</span> <span class="n">query_end</span> <span class="o">=</span> <span class="nn">Instant</span><span class="p">::</span><span class="nf">now</span><span class="p">();</span>
             <span class="k">let</span> <span class="n">duration_micros</span> <span class="o">=</span> <span class="p">(</span><span class="n">query_end</span> <span class="o">-</span> <span class="n">query_start</span><span class="p">)</span><span class="nf">.as_micros</span><span class="p">();</span>
             <span class="n">tx</span><span class="nf">.send</span><span class="p">(</span><span class="n">duration_micros</span><span class="p">)</span><span class="nf">.unwrap</span><span class="p">();</span>
@@ -195,7 +195,7 @@ of manual looping. Below I present a version of code after minor modifications t
             <span class="k">let</span> <span class="n">statement</span> <span class="o">=</span> <span class="n">statement</span><span class="nf">.bind</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">i</span> <span class="k">as</span> <span class="nb">i64</span><span class="p">)</span><span class="nf">.unwrap</span><span class="p">();</span>
             <span class="k">let</span> <span class="n">query_start</span> <span class="o">=</span> <span class="nn">Instant</span><span class="p">::</span><span class="nf">now</span><span class="p">();</span>
             <span class="k">let</span> <span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="nf">.execute</span><span class="p">(</span><span class="o">&amp;</span><span class="n">statement</span><span class="p">);</span>
-            <span class="n">result</span><span class="py">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
+            <span class="n">result</span><span class="k">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
             <span class="n">query_start</span><span class="nf">.elapsed</span><span class="p">()</span>
         <span class="p">})</span>
         <span class="c">// This will run up to `parallelism_limit` futures at a time:</span>
@@ -207,12 +207,12 @@ of manual looping. Below I present a version of code after minor modifications t
 
     <span class="c">// Connect to the database and prepare the statement:</span>
     <span class="k">let</span> <span class="n">session</span> <span class="o">=</span> <span class="c">// ...</span>
-    <span class="k">let</span> <span class="n">statement</span> <span class="o">=</span> <span class="n">session</span><span class="nf">.prepare</span><span class="p">(</span><span class="cm">/** statement */</span><span class="p">)</span><span class="nf">.unwrap</span><span class="p">()</span><span class="py">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
+    <span class="k">let</span> <span class="n">statement</span> <span class="o">=</span> <span class="n">session</span><span class="nf">.prepare</span><span class="p">(</span><span class="cm">/** statement */</span><span class="p">)</span><span class="nf">.unwrap</span><span class="p">()</span><span class="k">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
     <span class="k">let</span> <span class="k">mut</span> <span class="n">stream</span> <span class="o">=</span> <span class="nf">make_stream</span><span class="p">(</span><span class="o">&amp;</span><span class="n">session</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">statement</span><span class="p">,</span> <span class="n">count</span><span class="p">)</span>
 
     <span class="c">// Process the received durations: </span>
     <span class="k">let</span> <span class="n">benchmark_start</span> <span class="o">=</span> <span class="nn">Instant</span><span class="p">::</span><span class="nf">now</span><span class="p">();</span>
-    <span class="k">while</span> <span class="k">let</span> <span class="nf">Some</span><span class="p">(</span><span class="n">duration</span><span class="p">)</span> <span class="o">=</span> <span class="n">stream</span><span class="nf">.next</span><span class="p">()</span><span class="py">.await</span> <span class="p">{</span>
+    <span class="k">while</span> <span class="k">let</span> <span class="nf">Some</span><span class="p">(</span><span class="n">duration</span><span class="p">)</span> <span class="o">=</span> <span class="n">stream</span><span class="nf">.next</span><span class="p">()</span><span class="k">.await</span> <span class="p">{</span>
         <span class="c">// ... optionally compute durations statistics</span>
     <span class="p">}</span>
     <span class="nd">println!</span><span class="p">(</span>
@@ -248,9 +248,9 @@ If we use a multitheaded scheduler, it would be likely executed by another threa
 
 <div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">async</span> <span class="k">fn</span> <span class="nf">run_to_completion</span><span class="p">(</span><span class="k">mut</span> <span class="n">stream</span><span class="p">:</span> <span class="k">impl</span> <span class="n">Stream</span><span class="o">&lt;</span><span class="n">Item</span><span class="o">=</span><span class="n">Duration</span><span class="o">&gt;</span> <span class="o">+</span> <span class="n">Unpin</span> <span class="o">+</span> <span class="nb">Send</span> <span class="o">+</span> <span class="nv">'static</span><span class="p">)</span> <span class="p">{</span>
     <span class="k">let</span> <span class="n">task</span> <span class="o">=</span> <span class="nn">tokio</span><span class="p">::</span><span class="nf">spawn</span><span class="p">(</span><span class="k">async</span> <span class="k">move</span> <span class="p">{</span>
-        <span class="k">while</span> <span class="k">let</span> <span class="nf">Some</span><span class="p">(</span><span class="n">duration</span><span class="p">)</span> <span class="o">=</span> <span class="n">stream</span><span class="nf">.next</span><span class="p">()</span><span class="py">.await</span> <span class="p">{}</span>
+        <span class="k">while</span> <span class="k">let</span> <span class="nf">Some</span><span class="p">(</span><span class="n">duration</span><span class="p">)</span> <span class="o">=</span> <span class="n">stream</span><span class="nf">.next</span><span class="p">()</span><span class="k">.await</span> <span class="p">{}</span>
     <span class="p">});</span>
-    <span class="n">task</span><span class="py">.await</span><span class="p">;</span>
+    <span class="n">task</span><span class="k">.await</span><span class="p">;</span>
 <span class="p">}</span>
 </code></pre></div></div>
 
@@ -258,7 +258,7 @@ If we use a multitheaded scheduler, it would be likely executed by another threa
 lifetime. Unfortunately, this will make it problematic to use with the <code class="language-plaintext highlighter-rouge">make_stream</code> function we defined earlier:</p>
 
 <div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="k">mut</span> <span class="n">stream</span> <span class="o">=</span> <span class="nf">make_stream</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">statement</span><span class="p">,</span> <span class="n">count</span><span class="p">);</span>
-<span class="k">let</span> <span class="n">elapsed</span> <span class="o">=</span> <span class="nf">run_to_completion</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span><span class="py">.await</span><span class="p">;</span>
+<span class="k">let</span> <span class="n">elapsed</span> <span class="o">=</span> <span class="nf">run_to_completion</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span><span class="k">.await</span><span class="p">;</span>
 </code></pre></div></div>
 
 <pre>
@@ -284,9 +284,9 @@ performance, because we do it once per the whole stream:</p>
         <span class="k">let</span> <span class="n">session</span> <span class="o">=</span> <span class="n">session</span><span class="nf">.as_ref</span><span class="p">();</span>
         <span class="k">let</span> <span class="n">statement</span> <span class="o">=</span> <span class="n">statement</span><span class="nf">.as_ref</span><span class="p">();</span>
         <span class="k">let</span> <span class="k">mut</span> <span class="n">stream</span> <span class="o">=</span> <span class="nf">make_stream</span><span class="p">(</span><span class="n">session</span><span class="p">,</span> <span class="n">statement</span><span class="p">,</span> <span class="n">count</span><span class="p">);</span>
-        <span class="k">while</span> <span class="k">let</span> <span class="nf">Some</span><span class="p">(</span><span class="n">duration</span><span class="p">)</span> <span class="o">=</span> <span class="n">stream</span><span class="nf">.next</span><span class="p">()</span><span class="py">.await</span> <span class="p">{}</span>
+        <span class="k">while</span> <span class="k">let</span> <span class="nf">Some</span><span class="p">(</span><span class="n">duration</span><span class="p">)</span> <span class="o">=</span> <span class="n">stream</span><span class="nf">.next</span><span class="p">()</span><span class="k">.await</span> <span class="p">{}</span>
     <span class="p">});</span>
-    <span class="n">task</span><span class="py">.await</span><span class="p">;</span>
+    <span class="n">task</span><span class="k">.await</span><span class="p">;</span>
 <span class="p">}</span>
 </code></pre></div></div>
 
@@ -302,14 +302,14 @@ statement streams:</p>
 
     <span class="k">let</span> <span class="n">session</span> <span class="o">=</span> <span class="c">// ... connect</span>
     <span class="k">let</span> <span class="n">session</span> <span class="o">=</span> <span class="nn">Arc</span><span class="p">::</span><span class="nf">new</span><span class="p">(</span><span class="n">session</span><span class="p">);</span>
-    <span class="k">let</span> <span class="n">statement</span> <span class="o">=</span> <span class="n">session</span><span class="nf">.prepare</span><span class="p">(</span><span class="s">"SELECT * FROM keyspace1.test WHERE pk = ?"</span><span class="p">)</span><span class="nf">.unwrap</span><span class="p">()</span><span class="py">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
+    <span class="k">let</span> <span class="n">statement</span> <span class="o">=</span> <span class="n">session</span><span class="nf">.prepare</span><span class="p">(</span><span class="s">"SELECT * FROM keyspace1.test WHERE pk = ?"</span><span class="p">)</span><span class="nf">.unwrap</span><span class="p">()</span><span class="k">.await</span><span class="nf">.unwrap</span><span class="p">();</span>
     <span class="k">let</span> <span class="n">statement</span> <span class="o">=</span> <span class="nn">Arc</span><span class="p">::</span><span class="nf">new</span><span class="p">(</span><span class="n">statement</span><span class="p">);</span>
 
     <span class="k">let</span> <span class="n">benchmark_start</span> <span class="o">=</span> <span class="nn">Instant</span><span class="p">::</span><span class="nf">now</span><span class="p">();</span>
     <span class="k">let</span> <span class="n">thread_1</span> <span class="o">=</span> <span class="nf">run_stream</span><span class="p">(</span><span class="n">session</span><span class="nf">.clone</span><span class="p">(),</span> <span class="n">statement</span><span class="nf">.clone</span><span class="p">(),</span> <span class="n">count</span> <span class="o">/</span> <span class="mi">2</span><span class="p">);</span>
     <span class="k">let</span> <span class="n">thread_2</span> <span class="o">=</span> <span class="nf">run_stream</span><span class="p">(</span><span class="n">session</span><span class="nf">.clone</span><span class="p">(),</span> <span class="n">statement</span><span class="nf">.clone</span><span class="p">(),</span> <span class="n">count</span> <span class="o">/</span> <span class="mi">2</span><span class="p">);</span>
-    <span class="n">thread_1</span><span class="py">.await</span><span class="p">;</span>
-    <span class="n">thread_2</span><span class="py">.await</span><span class="p">;</span>
+    <span class="n">thread_1</span><span class="k">.await</span><span class="p">;</span>
+    <span class="n">thread_2</span><span class="k">.await</span><span class="p">;</span>
 
     <span class="nd">println!</span><span class="p">(</span>
         <span class="s">"Throughput: {:.1} request/s"</span><span class="p">,</span>
