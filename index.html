@@ -66,6 +66,28 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <article>
     <header>
   
+  <h1><a href="/overhead-of-optional/">Overhead of Returning Optional Values in Java and Rust</a></h1><time datetime="2021-10-16T00:00:00+02:00">October 16, 2021</time>
+</header>
+
+    <p>Some programming languages like Java or Scala offer more than one way to express
+a concept of “lack of value”. Traditionally, a special <code class="language-plaintext highlighter-rouge">null</code> value is used to denote
+references that don’t reference any value at all. However, over time we 
+have learned that using <code class="language-plaintext highlighter-rouge">null</code>s can be very error-prone and can cause many troubles like 
+<code class="language-plaintext highlighter-rouge">NullPointerException</code> errors crashing a program in the most unexpected moment. 
+Therefore, modern programming style recommends avoiding <code class="language-plaintext highlighter-rouge">nulls</code> wherever possible 
+in favor of a much better <code class="language-plaintext highlighter-rouge">Option</code>, <code class="language-plaintext highlighter-rouge">Optional</code> or <code class="language-plaintext highlighter-rouge">Maybe</code> data type 
+(called differently in many languages, but the concept is the same).
+Unfortunately, it is believed that optional values in Java may come with a 
+performance penalty. In this blog post, I’ll try to answer whether 
+it is true, and if the performance penalty really exists, how serious it is.</p>
+
+
+    <div class="more"><a href="/overhead-of-optional/">read more</a></div>
+  </article>
+
+  <article>
+    <header>
+  
   <h1><a href="/disk-access-ordering/">Ordering Requests to Accelerate Disk I/O</a></h1><time datetime="2021-04-04T00:00:00+02:00">April 04, 2021</time>
 </header>
 

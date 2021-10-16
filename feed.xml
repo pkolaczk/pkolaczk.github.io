@@ -1,4 +1,569 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://jekyllrb.com/" version="4.1.1">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" hreflang="en" /><updated>2021-04-04T21:05:29+02:00</updated><id>/feed.xml</id><title type="html">Piotr Kołaczkowski</title><subtitle>Blog on programming, optimization and performance analysis</subtitle><author><name>Piotr Kołaczkowski</name></author><entry><title type="html">Ordering Requests to Accelerate Random Disk I/O</title><link href="/disk-access-ordering/" rel="alternate" type="text/html" title="Ordering Requests to Accelerate Random Disk I/O" /><published>2021-04-04T00:00:00+02:00</published><updated>2021-04-04T00:00:00+02:00</updated><id>/disk-access-ordering</id><content type="html" xml:base="/disk-access-ordering/">&lt;p&gt;In &lt;a href=&quot;/disk-parallelism/&quot;&gt;the earlier post&lt;/a&gt; I showed how accessing data on
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://jekyllrb.com/" version="4.1.1">Jekyll</generator><link href="/feed.xml" rel="self" type="application/atom+xml" /><link href="/" rel="alternate" type="text/html" hreflang="en" /><updated>2021-10-16T11:23:09+02:00</updated><id>/feed.xml</id><title type="html">Piotr Kołaczkowski</title><subtitle>Blog on programming, optimization and performance analysis</subtitle><author><name>Piotr Kołaczkowski</name></author><entry><title type="html">Overhead of Returning Optional Values in Java and Rust</title><link href="/overhead-of-optional/" rel="alternate" type="text/html" title="Overhead of Returning Optional Values in Java and Rust" /><published>2021-10-16T00:00:00+02:00</published><updated>2021-10-16T00:00:00+02:00</updated><id>/overhead-of-optional</id><content type="html" xml:base="/overhead-of-optional/">&lt;p&gt;Some programming languages like Java or Scala offer more than one way to express
+a concept of “lack of value”. Traditionally, a special &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;null&lt;/code&gt; value is used to denote
+references that don’t reference any value at all. However, over time we 
+have learned that using &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;null&lt;/code&gt;s can be very error-prone and can cause many troubles like 
+&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;NullPointerException&lt;/code&gt; errors crashing a program in the most unexpected moment. 
+Therefore, modern programming style recommends avoiding &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;nulls&lt;/code&gt; wherever possible 
+in favor of a much better &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Option&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional&lt;/code&gt; or &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Maybe&lt;/code&gt; data type 
+(called differently in many languages, but the concept is the same).
+Unfortunately, it is believed that optional values in Java may come with a 
+performance penalty. In this blog post, I’ll try to answer whether 
+it is true, and if the performance penalty really exists, how serious it is.&lt;/p&gt;
+
+&lt;!--more--&gt;
+
+&lt;p&gt;Before we start, let me point out that if you don’t care much about extreme runtime performance, 
+you should never use &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;null&lt;/code&gt; in Java nor Scala, except for in rare cases of working with legacy APIs. 
+Just forget &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;null&lt;/code&gt; ever existed in the language. And if you receive an occasional &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;null&lt;/code&gt; from an API 
+you can’t control, just wrap it immediately in &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional&amp;lt;T&amp;gt;&lt;/code&gt; / &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Option[T]&lt;/code&gt;. Don’t let &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;nulls&lt;/code&gt; bite you. 
+You won’t regret it. To learn the reasons why null pointers / null references are a bad idea,
+watch &lt;a href=&quot;https://www.infoq.com/presentations/Null-References-The-Billion-Dollar-Mistake-Tony-Hoare/&quot;&gt;this talk by Tony Hoare&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Ok, but if we care about performance? How much do optionals actually cost? 
+Some say optionals are expensive because they cause heap allocation and often force the underlying type to be boxed.
+Not only heap allocation is costly, but it also forces the garbage collector to run more frequently.
+Others say that it doesn’t really matter, because the JVM compiler will eliminate the overhead thanks to inlining and escape analysis,
+and in most cases it should transform the code to an equivalent of code using null pointers.&lt;/p&gt;
+
+&lt;p&gt;Who is right? Let’s make a quick benchmark.&lt;/p&gt;
+
+&lt;h1 id=&quot;java-benchmark&quot;&gt;Java Benchmark&lt;/h1&gt;
+&lt;p&gt;How to measure &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional&lt;/code&gt; overhead? The time to create an &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional&lt;/code&gt; object instance, even assuming a pessimistic case 
+of allocating it on the heap, is likely too small to measure it directly. We need to create many &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional&lt;/code&gt; objects 
+in a tight loop and time the whole loop.&lt;/p&gt;
+
+&lt;p&gt;We also need to make sure the compiler doesn’t notice the code does nothing or does
+something trivial. We don’t want the loop to be eliminated. 
+A proper way of dealing with this problem is using all of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional&lt;/code&gt; objects we create so that
+their values affect the final result computed in the benchmark. Then the final result must be consumed by a black hole. 
+Fortunately a benchmarking tool like &lt;a href=&quot;https://github.com/openjdk/jmh&quot;&gt;JMH&lt;/a&gt; makes it all easy.&lt;/p&gt;
+
+&lt;p&gt;I created three variants of code solving the same task. The task was to compute a sum of all the numbers, skipping the number 
+whenever it is equal to a magic constant. The variants differ by the way how skipping is realized:&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;We return primitive &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;long&lt;/code&gt;s and check if we need to skip by performing a comparison with the magic value directly in the summing loop.&lt;/li&gt;
+  &lt;li&gt;We return boxed &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Long&lt;/code&gt;s and we return &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;null&lt;/code&gt; whenever we need to skip a number.&lt;/li&gt;
+  &lt;li&gt;We return boxed &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Long&lt;/code&gt;s wrapped in &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional&lt;/code&gt; and we return &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional.empty()&lt;/code&gt; whenever we need to skip a number.&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;div class=&quot;language-java highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;nd&quot;&gt;@State&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nc&quot;&gt;Scope&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;Benchmark&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;nd&quot;&gt;@Fork&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;nd&quot;&gt;@Warmup&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;iterations&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;2&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;nd&quot;&gt;@Measurement&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;iterations&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;5&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;OptionBenchmark&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+
+    &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;final&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;no&quot;&gt;MAGIC_NUMBER&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;7&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+
+    &lt;span class=&quot;c1&quot;&gt;// Variant 1.&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;// Probably the simplest way to sum numbers.&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;// No boxing, no objects involved, just primitive long values everywhere.&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;// This is probably what a C-programmer converted to Java would write ;)&lt;/span&gt;
+    &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;getNumber&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&lt;/span&gt; &lt;span class=&quot;mh&quot;&gt;0xFF&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+
+    &lt;span class=&quot;nd&quot;&gt;@Benchmark&lt;/span&gt;
+    &lt;span class=&quot;nd&quot;&gt;@BenchmarkMode&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nc&quot;&gt;Mode&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;AverageTime&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;nd&quot;&gt;@OutputTimeUnit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nc&quot;&gt;TimeUnit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;MICROSECONDS&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;sumSimple&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1_000_000&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;++&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+            &lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;getNumber&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+            &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;!=&lt;/span&gt; &lt;span class=&quot;no&quot;&gt;MAGIC_NUMBER&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;
+                &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+        &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+
+    &lt;span class=&quot;c1&quot;&gt;// Variant 2.&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;// Replace MAGIC_NUMBER with a null.&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;// To be able to return null, we need to box long into a Long object.&lt;/span&gt;
+    &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;Long&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;getNumberOrNull&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&lt;/span&gt; &lt;span class=&quot;mh&quot;&gt;0xFF&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;==&lt;/span&gt; &lt;span class=&quot;no&quot;&gt;MAGIC_NUMBER&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;?&lt;/span&gt; &lt;span class=&quot;kc&quot;&gt;null&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+
+    &lt;span class=&quot;nd&quot;&gt;@Benchmark&lt;/span&gt;
+    &lt;span class=&quot;nd&quot;&gt;@BenchmarkMode&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nc&quot;&gt;Mode&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;AverageTime&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;nd&quot;&gt;@OutputTimeUnit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nc&quot;&gt;TimeUnit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;MICROSECONDS&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;sumNulls&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1_000_000&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;++&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+            &lt;span class=&quot;nc&quot;&gt;Long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;getNumberOrNull&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+            &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;!=&lt;/span&gt; &lt;span class=&quot;kc&quot;&gt;null&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+                &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+            &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+        &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+
+
+    &lt;span class=&quot;c1&quot;&gt;// Variant 3.&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;// Replace MAGIC_NUMBER with Optional.empty().&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;// Now we not only need to box the value into a Long, but also create the Optionsl wrapper.&lt;/span&gt;
+    &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;Optional&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;nc&quot;&gt;Long&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;getOptionalNumber&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&lt;/span&gt; &lt;span class=&quot;mh&quot;&gt;0xFF&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;==&lt;/span&gt; &lt;span class=&quot;no&quot;&gt;MAGIC_NUMBER&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;?&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;Optional&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;empty&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;Optional&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;of&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+    &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+
+    &lt;span class=&quot;nd&quot;&gt;@Benchmark&lt;/span&gt;
+    &lt;span class=&quot;nd&quot;&gt;@BenchmarkMode&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nc&quot;&gt;Mode&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;AverageTime&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;nd&quot;&gt;@OutputTimeUnit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;nc&quot;&gt;TimeUnit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;MICROSECONDS&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;sumOptional&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;kt&quot;&gt;long&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1_000_000&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;++&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+            &lt;span class=&quot;nc&quot;&gt;Optional&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;nc&quot;&gt;Long&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;getOptionalNumber&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+            &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;isPresent&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;())&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+                &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;get&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;();&lt;/span&gt;
+            &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+        &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h1 id=&quot;results&quot;&gt;Results&lt;/h1&gt;
+
+&lt;p&gt;Obviously all variants compute the same sum, so a &lt;em&gt;sufficiently smart compiler&lt;/em&gt; should be able to generate exactly the same machine 
+code for all of them. The method returning the number is very short and trivial, so I was expecting the compiler to inline it,
+remove all of object overhead through escape analysis, unroll and maybe even vectorize the loop.
+The number of invocations is constant and known at compile time, and the computations are trivial.
+Real code in real projects is usually not as simple as this microbenchmark, so we’re essentially testing the best-case scenario here.&lt;/p&gt;
+
+&lt;p&gt;OpenJDK 8 (JDK 1.8.0_292, OpenJDK 64-Bit Server VM, 25.292-b10):&lt;/p&gt;
+&lt;pre&gt;
+Benchmark                    Mode  Cnt     Score     Error  Units
+OptionBenchmark.sumSimple    avgt    5  1141,557 ± 366,538  us/op
+OptionBenchmark.sumNulls     avgt    5  2324,597 ±  79,033  us/op
+OptionBenchmark.sumOptional  avgt    5  4576,383 ± 288,571  us/op
+&lt;/pre&gt;
+
+&lt;p&gt;OpenJDK 11 (Java HotSpot(TM) 64-Bit Server VM, 11+28):&lt;/p&gt;
+&lt;pre&gt;
+Benchmark                    Mode  Cnt     Score     Error  Units
+OptionBenchmark.sumSimple    avgt    5   603,683 ±  13,246  us/op
+OptionBenchmark.sumNulls     avgt    5  2444,626 ±  35,236  us/op
+OptionBenchmark.sumOptional  avgt    5  4303,527 ± 109,900  us/op
+&lt;/pre&gt;
+
+&lt;p&gt;Graal Community 21.2 (JDK 16.0.2, OpenJDK 64-Bit Server VM, 16.0.2+7-jvmci-21.2-b08):&lt;/p&gt;
+&lt;pre&gt;
+OptionBenchmark.sumSimple    avgt    5   868,155 ±  42,103  us/op
+OptionBenchmark.sumNulls     avgt    5  1937,866 ±  29,938  us/op
+OptionBenchmark.sumOptional  avgt    5  4201,451 ± 613,179  us/op
+&lt;/pre&gt;
+
+&lt;p&gt;OpenJDK 17 (JDK 17-ea, OpenJDK 64-Bit Server VM, 17-ea+19-Ubuntu-1ubuntu1):&lt;/p&gt;
+&lt;pre&gt;
+Benchmark                    Mode  Cnt     Score     Error  Units
+OptionBenchmark.sumSimple    avgt    5   449,811 ±  60,889  us/op
+OptionBenchmark.sumNulls     avgt    5   952,622 ±  84,138  us/op
+OptionBenchmark.sumOptional  avgt    5  4002,787 ± 264,937  us/op
+&lt;/pre&gt;
+
+&lt;p&gt;Seriously, these outcomes are totally not what I expected. In all cases
+JVM did a poor job of eliminating both the boxing and the optionals. 
+This led to about 8x worse timings for looping over optionals than looping 
+over primitive longs on JDK 17. I even reran the benchmarks 
+with explicit &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;-XX:+DoEscapeAnalysis -XX:+Inline&lt;/code&gt; to make sure these are turned on, 
+but that hasn’t changed anything (they should be enabled by default anyway).&lt;/p&gt;
+
+&lt;p&gt;At least, there is a steady progress in performance between different JDK versions.&lt;/p&gt;
+
+&lt;h2 id=&quot;disabling-inlining&quot;&gt;Disabling Inlining&lt;/h2&gt;
+&lt;p&gt;In real production code it can also happen that a method that returns an &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional&lt;/code&gt; doesn’t get inlined.
+How does it affect the overhead? I reran the benchmarks with &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;-XX:-Inline&lt;/code&gt; option:&lt;/p&gt;
+
+&lt;p&gt;JDK 1.8.0_292, OpenJDK 64-Bit Server VM, 25.292-b10:&lt;/p&gt;
+&lt;pre&gt;
+Benchmark                    Mode  Cnt      Score      Error  Units
+OptionBenchmark.sumSimple    avgt    5   2244,281 ± 1271,115  us/op
+OptionBenchmark.sumNulls     avgt    5   9024,197 ±  391,510  us/op
+OptionBenchmark.sumOptional  avgt    5  20045,933 ±  777,194  us/op
+
+&lt;/pre&gt;
+
+&lt;p&gt;JDK 11, Java HotSpot(TM) 64-Bit Server VM, 11+28&lt;/p&gt;
+&lt;pre&gt;
+Benchmark                    Mode  Cnt      Score      Error  Units
+OptionBenchmark.sumSimple    avgt    5   2385,597 ±  323,662  us/op
+OptionBenchmark.sumNulls     avgt    5   7900,140 ± 2841,416  us/op
+OptionBenchmark.sumOptional  avgt    5  20507,346 ± 5236,451  us/op
+&lt;/pre&gt;
+
+&lt;p&gt;JDK 17-ea, OpenJDK 64-Bit Server VM, 17-ea+19-Ubuntu-1ubuntu1:&lt;/p&gt;
+&lt;pre&gt;
+Benchmark                    Mode  Cnt      Score      Error  Units
+OptionBenchmark.sumSimple    avgt    5   2382,109 ± 1346,017  us/op
+OptionBenchmark.sumNulls     avgt    5   7664,463 ± 2040,463  us/op
+OptionBenchmark.sumOptional  avgt    5  17961,942 ±  773,224  us/op
+&lt;/pre&gt;
+
+&lt;p&gt;Everything got much slower, but optionals and boxing overhead are still clearly visible and the ratio
+is still more than 7x. Rhe difference between JDKs is much smaller this time.&lt;/p&gt;
+
+&lt;h1 id=&quot;rust-benchmark&quot;&gt;Rust Benchmark&lt;/h1&gt;
+
+&lt;p&gt;I’ve rewritten everything to Rust because Rust also has optional values, and I was curious if a similar 
+difference would be present. The code was trivial to port, except the variant that was using nulls, because Rust has no nulls 
+(which is IMHO a good thing). Instead, I added two more variants:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;A variant with &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;NonZeroU64&lt;/code&gt; (non zero integer) which should allow the compiler to get rid of the option overhead, 
+and just use value &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;0&lt;/code&gt; for representing &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;None&lt;/code&gt;.&lt;/li&gt;
+  &lt;li&gt;A special “I would never write Rust like that” variant that returns the value in a &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Box&lt;/code&gt; on the heap. This is because a friend
+of mine, after seeing my results, told me I was cheating, because all Rust versions so far used registers/stack to return the value, 
+and Java was at a disadvantage due to returning on the heap (by default). So here you are.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;div class=&quot;language-rust highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;k&quot;&gt;use&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;std&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;::&lt;/span&gt;&lt;span class=&quot;nn&quot;&gt;num&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;::&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;NonZeroU64&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;const&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MAGIC&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;7&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;fn&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;get_int&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0xFF&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;pub&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;fn&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;sum_simple&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;mut&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;in&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;..&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1_000_000&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;get_int&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;!=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MAGIC&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+            &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+        &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;fn&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;get_optional_int&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;Option&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0xFF&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;==&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MAGIC&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;None&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;else&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;Some&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+
+&lt;span class=&quot;k&quot;&gt;pub&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;fn&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;sum_optional&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;mut&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;in&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;..&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1_000_000&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;value&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;get_optional_int&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;Some&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;k&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;value&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+            &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;k&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+        &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;fn&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;get_optional_non_zero&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;Option&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;NonZeroU64&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0xFF&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;==&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MAGIC&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;None&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;else&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;NonZeroU64&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;::&lt;/span&gt;&lt;span class=&quot;nf&quot;&gt;new&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;pub&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;fn&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;sum_optional_non_zero&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;mut&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;in&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;..&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1_000_000&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;value&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;get_optional_non_zero&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;Some&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;k&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;value&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+            &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;k&lt;/span&gt;&lt;span class=&quot;nf&quot;&gt;.get&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;();&lt;/span&gt;
+        &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+
+&lt;span class=&quot;k&quot;&gt;fn&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;get_int_boxed&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;Box&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;nn&quot;&gt;Box&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;::&lt;/span&gt;&lt;span class=&quot;nf&quot;&gt;new&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;amp;&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0xFF&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;pub&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;fn&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;sum_boxed&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;u64&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;mut&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;i&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;in&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;..&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1_000_000&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;let&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;get_int_boxed&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;i&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;);&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;n&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;!=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MAGIC&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+            &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+=&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;n&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;;&lt;/span&gt;
+        &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;sum&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h2 id=&quot;results-1&quot;&gt;Results&lt;/h2&gt;
+&lt;p&gt;Let the numbers speak for themselves.&lt;/p&gt;
+
+&lt;p&gt;With inlining, compiled specifically for my CPU with &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;RUSTFLAGS=&quot;-C target-cpu=native&quot;&lt;/code&gt;:&lt;/p&gt;
+&lt;pre&gt;
+sum_simple              time:   [121.33 us 121.60 us 121.89 us]                        
+sum_optional            time:   [121.65 us 121.97 us 122.29 us]                         
+sum_optional_non_zero   time:   [123.22 us 123.71 us 124.26 us]                                  
+sum_boxed               time:   [122.36 us 123.19 us 124.21 us]    
+&lt;/pre&gt;
+
+&lt;p&gt;With default release options:&lt;/p&gt;
+&lt;pre&gt;
+sum_simple              time:   [375.58 us 377.02 us 378.73 us]                        
+sum_optional            time:   [373.19 us 374.20 us 375.31 us]                         
+sum_optional_non_zero   time:   [373.09 us 374.24 us 375.60 us]                                  
+sum_boxed               time:   [374.15 us 376.07 us 378.38 us]                      
+&lt;/pre&gt;
+
+&lt;p&gt;With default release options, but with inlining of the inner functions 
+returning the number blocked by &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;#[inline(never)]&lt;/code&gt;:&lt;/p&gt;
+&lt;pre&gt;
+sum_simple              time:   [1.3899 ms 1.3940 ms 1.3987 ms]                         
+sum_optional            time:   [1.4066 ms 1.4117 ms 1.4177 ms]                          
+sum_optional_non_zero   time:   [1.1041 ms 1.1089 ms 1.1145 ms]                                   
+sum_boxed               time:   [14.572 ms 14.629 ms 14.692 ms]     
+&lt;/pre&gt;
+
+&lt;h1 id=&quot;analysis&quot;&gt;Analysis&lt;/h1&gt;
+
+&lt;p&gt;Why has Java scored so bad compared to Rust?&lt;/p&gt;
+
+&lt;p&gt;I added the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;-perfasm&lt;/code&gt; option to the JMH options of the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;sumOptional&lt;/code&gt; Java benchmark 
+and it resulted in the following disassembly output (I’m actually showing only a relevant fragment of it):&lt;/p&gt;
+
+&lt;pre&gt;
+  0,01%   ╭ │     0x00007fcc78d3a3eb:   jmp    0x00007fcc78d3a495           ;*goto {reexecute=0 rethrow=0 return_oop=0}
+          │ │                                                               ; - pk.OptionBenchmark::sumOptional@45 (line 73)
+  0,31%   │ │  ↗  0x00007fcc78d3a3f0:   mov    QWORD PTR [r15+0x108],rsi
+  3,08%   │ │  │  0x00007fcc78d3a3f7:   prefetchw BYTE PTR [rsi+0xc0]
+  3,34%   │ │  │  0x00007fcc78d3a3fe:   mov    QWORD PTR [r10],0x1
+  0,24%   │ │  │  0x00007fcc78d3a405:   mov    DWORD PTR [r10+0x8],0x49770  ;   {metadata(&amp;apos;java/lang/Long&amp;apos;)}
+  0,54%   │ │  │  0x00007fcc78d3a40d:   mov    DWORD PTR [r10+0xc],r12d     ;*new {reexecute=0 rethrow=0 return_oop=0}
+          │ │  │                                                            ; - java.lang.Long::valueOf@31 (line 1211)
+          │ │  │                                                            ; - pk.OptionBenchmark::getOptionalNumber@21 (line 65)
+          │ │  │                                                            ; - pk.OptionBenchmark::sumOptional@14 (line 74)
+  2,55%   │ │  │  0x00007fcc78d3a411:   mov    QWORD PTR [r10+0x10],r11
+  1,58%   │ │ ↗│  0x00007fcc78d3a415:   mov    rax,QWORD PTR [r15+0x108]
+  2,71%   │ │ ││  0x00007fcc78d3a41c:   mov    r11,rax
+  0,72%   │ │ ││  0x00007fcc78d3a41f:   add    r11,0x10
+  3,48%   │ │ ││  0x00007fcc78d3a423:   cmp    r11,QWORD PTR [r15+0x118]
+          │ │ ││  0x00007fcc78d3a42a:   jae    0x00007fcc78d3a574           ;*goto {reexecute=0 rethrow=0 return_oop=0}
+          │ │ ││                                                            ; - pk.OptionBenchmark::sumOptional@45 (line 73)
+  1,90%   │ │ ││  0x00007fcc78d3a430:   mov    QWORD PTR [r15+0x108],r11
+  1,80%   │ │ ││  0x00007fcc78d3a437:   prefetchw BYTE PTR [r11+0xc0]
+  5,22%   │ │ ││  0x00007fcc78d3a43f:   mov    QWORD PTR [rax],0x1
+  3,78%   │ │ ││  0x00007fcc78d3a446:   mov    DWORD PTR [rax+0x8],0x11af00 ;*new {reexecute=0 rethrow=0 return_oop=0}
+          │ │ ││                                                            ; - java.util.Optional::of@0 (line 113)
+          │ │ ││                                                            ; - pk.OptionBenchmark::getOptionalNumber@24 (line 65)
+          │ │ ││                                                            ; - pk.OptionBenchmark::sumOptional@14 (line 74)
+          │ │ ││                                                            ;   {metadata(&amp;apos;java/util/Optional&amp;apos;)}
+  2,20%   │ │ ││  0x00007fcc78d3a44d:   mov    r11,r10
+  1,54%   │ │ ││  0x00007fcc78d3a450:   shr    r11,0x3
+  0,87%   │ │ ││  0x00007fcc78d3a454:   mov    DWORD PTR [rax+0xc],r11d     ;*synchronization entry
+          │ │ ││                                                            ; - pk.OptionBenchmark::getOptionalNumber@-1 (line 64)
+          │ │ ││                                                            ; - pk.OptionBenchmark::sumOptional@14 (line 74)
+  3,23%   │ │ ││  0x00007fcc78d3a458:   mov    r11d,DWORD PTR [rax+0xc]     ;*getfield value {reexecute=0 rethrow=0 return_oop=0}
+          │ │ ││                                                            ; - java.util.Optional::isPresent@1 (line 154)
+          │ │ ││                                                            ; - pk.OptionBenchmark::sumOptional@21 (line 75)
+  2,24%   │ │ ││  0x00007fcc78d3a45c:   nop    DWORD PTR [rax+0x0]
+  1,47%   │ │ ││  0x00007fcc78d3a460:   test   r11d,r11d
+          │╭│ ││  0x00007fcc78d3a463:   je     0x00007fcc78d3a47f
+  2,72%   │││ ││  0x00007fcc78d3a465:   mov    r10d,DWORD PTR [r12+r11*8+0x8]
+ 11,00%   │││ ││  0x00007fcc78d3a46a:   shl    r11,0x3
+  0,92%   │││ ││  0x00007fcc78d3a46e:   cmp    r10d,0x49770                 ;*synchronization entry
+          │││ ││                                                            ; - pk.OptionBenchmark::getOptionalNumber@-1 (line 64)
+          │││ ││                                                            ; - pk.OptionBenchmark::sumOptional@14 (line 74)
+          │││ ││                                                            ;   {metadata(&amp;apos;java/lang/Long&amp;apos;)}
+          │││ ││  0x00007fcc78d3a475:   jne    0x00007fcc78d3a687           ;*checkcast {reexecute=0 rethrow=0 return_oop=0}
+          │││ ││                                                            ; - pk.OptionBenchmark::sumOptional@33 (line 76)
+  4,53%   │││ ││  0x00007fcc78d3a47b:   add    rcx,QWORD PTR [r11+0x10]     ;*lload_3 {reexecute=0 rethrow=0 return_oop=0}
+          │││ ││                                                            ; - pk.OptionBenchmark::sumOptional@41 (line 73)
+  5,89%   │↘│ ││  0x00007fcc78d3a47f:   add    r8,0x1
+  0,92%   │ │ ││  0x00007fcc78d3a483:   mov    r11,r8                       ;*synchronization entry
+          │ │ ││                                                            ; - pk.OptionBenchmark::getOptionalNumber@-1 (line 64)
+          │ │ ││                                                            ; - pk.OptionBenchmark::sumOptional@14 (line 74)
+  0,62%   │ │ ││  0x00007fcc78d3a486:   movzx  r11,r11b                     ;*land {reexecute=0 rethrow=0 return_oop=0}
+          │ │ ││                                                            ; - pk.OptionBenchmark::getOptionalNumber@4 (line 64)
+          │ │ ││                                                            ; - pk.OptionBenchmark::sumOptional@14 (line 74)
+  1,14%   │ │ ││  0x00007fcc78d3a48a:   inc    edi
+  4,42%   │ │ ││  0x00007fcc78d3a48c:   cmp    edi,r9d
+          │ ╰ ││  0x00007fcc78d3a48f:   jge    0x00007fcc78d3a3b3
+&lt;/pre&gt;
+
+&lt;p&gt;My knowledge of Intel assembly is quite limited, but I can clearly see a few things:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;The call to &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;getOptionalNumber&lt;/code&gt; got inlined. There are no calls anywhere in the body of the loop. This is good.&lt;/li&gt;
+  &lt;li&gt;There is a lot of code caused by allocating and initializing the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Long&lt;/code&gt; instance. 
+We can see &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;java.lang.Long::valueOf@31 (line 1211)&lt;/code&gt; got inlined, but the allocation hasn’t been eliminated. This is very bad.&lt;/li&gt;
+  &lt;li&gt;There is a similar problem with the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Option&lt;/code&gt; object - it got inlined, but it is still allocated on the heap and 
+its internal structure remained intact. I was hoping for a scalar-replacement here, but weirdly it hasn’t happened.&lt;/li&gt;
+  &lt;li&gt;The number to be summed is being copied out from the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Option&lt;/code&gt; object. There are many needless data transfers between memory and registers.&lt;/li&gt;
+  &lt;li&gt;Skipping the magic number is performed by a conditional jump. In this case it is probably not a problem, 
+because we’re skipping just one number per 256, but this could potentially cause branch misprediction if the ratio was different and not so regular.&lt;/li&gt;
+  &lt;li&gt;No SSE/AVX used anywhere. It treated my CPU as if it was some ancient Pentium :(&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;To confirm my interpretation of the disassembly, I also ran all the benchmarks with &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;-perf gc&lt;/code&gt;:&lt;/p&gt;
+&lt;pre&gt;
+Benchmark                                                     Mode  Cnt         Score        Error   Units
+OptionBenchmark.sumSimple:·gc.alloc.rate                      avgt    5        ≈ 10⁻⁴               MB/sec
+OptionBenchmark.sumSimple:·gc.count                           avgt    5           ≈ 0               counts
+
+OptionBenchmark.sumNulls:·gc.alloc.rate                       avgt    5        ≈ 10⁻⁴               MB/sec
+OptionBenchmark.sumNulls:·gc.count                            avgt    5           ≈ 0               counts
+
+OptionBenchmark.sumOptional:·gc.alloc.rate                    avgt    5      6193,432 ±    424,465  MB/sec
+OptionBenchmark.sumOptional:·gc.count                         avgt    5       546,000               counts
+&lt;/pre&gt;
+
+&lt;p&gt;As you can see, the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;sumOptional&lt;/code&gt; benchmark was allocating at rate over 6 GB/s!&lt;/p&gt;
+
+&lt;h2 id=&quot;rust-output-code&quot;&gt;Rust output code&lt;/h2&gt;
+&lt;p&gt;The code generated by Rust using default options looks much simpler:&lt;/p&gt;
+
+&lt;pre&gt;
+            Disassembly of section .text:
+               
+            0000000000050f40 &amp;lt;benchmark::sum_optional&amp;gt;:
+            benchmark::sum_optional:
+              mov    $0x4,%ecx
+              xor    %edx,%edx
+              xor    %eax,%eax
+              nop           
+  2,67  10:   lea    -0x4(%rcx),%esi
+  5,65        lea    -0x3(%rcx),%edi
+  2,61        movzbl %sil,%esi
+  4,29        cmp    $0x7,%rsi
+  2,76        cmove  %rdx,%rsi
+  5,71        add    %rax,%rsi
+  2,47        lea    -0x2(%rcx),%eax
+  4,41        movzbl %dil,%edi
+  2,69        cmp    $0x7,%rdi
+  6,05        cmove  %rdx,%rdi
+  3,29        add    %rsi,%rdi
+  3,98        lea    -0x1(%rcx),%esi
+  2,53        movzbl %al,%eax
+  5,09        cmp    $0x7,%rax
+  3,37        cmove  %rdx,%rax
+  4,76        add    %rdi,%rax
+  2,75        movzbl %sil,%esi
+  4,80        cmp    $0x7,%rsi
+  3,15        cmove  %rdx,%rsi
+  5,64        add    %rax,%rsi
+  2,23        movzbl %cl,%eax
+  4,18        cmp    $0x7,%rax
+  2,78        cmove  %rdx,%rax
+  5,31        add    %rsi,%rax
+  2,44        add    $0x5,%rcx
+              cmp    $0xf4244,%rcx
+  4,40      ↑ jne    10     
+  0,01      ← ret           
+&lt;/pre&gt;
+
+&lt;p&gt;The code is much shorter, even despite the fact the loop has been unrolled. It is also way simpler and easier to understand.
+In the body of the loop there are no moves between memory and registers, and there are no branches.
+Skipping the number is performed with a conditional move instruction which looks like a very natural choice to me.&lt;/p&gt;
+
+&lt;p&gt;It is worth noting the code for all of four variants is identical and the compiler even merged copies into one.
+The compiler managed to get rid of all the overhead of &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Option&lt;/code&gt; and &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Box&lt;/code&gt;.
+These abstrations turned out to be truly zero-cost!&lt;/p&gt;
+
+&lt;p&gt;As a final check I compiled the benchmark with &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;RUSTFLAGS=&quot;-C target-cpu=native&quot;&lt;/code&gt;:&lt;/p&gt;
+
+&lt;pre&gt;
+             Disassembly of section .text:
+               
+             0000000000057d50 &amp;lt;benchmark::sum_classic&amp;gt;:
+             btree_benchmark::sum_optional:
+               sub          $0x38,%rsp
+  0,00         vmovdqa      anon.b26f45dd7d0ea1d60480ae6c3c88753d.34.llvm.65588711349491208+0x4d0,%ymm0
+               vpxor        %xmm11,%xmm11,%xmm11
+               mov          $0xf4240,%eax
+               vpbroadcastq 0x1d5b31(%rip),%ymm1        # 22d8a0 &amp;lt;anon.b26f45dd7d0ea1d60480ae6c3c88753d.34.llvm.65588711349491208+0x4f0&amp;gt;
+               vmovdqu      %ymm1,(%rsp)
+               vpbroadcastq 0x1d5b2b(%rip),%ymm2        # 22d8a8 &amp;lt;anon.b26f45dd7d0ea1d60480ae6c3c88753d.34.llvm.65588711349491208+0x4f8&amp;gt;
+               vpbroadcastq 0x1d5b2a(%rip),%ymm3        # 22d8b0 &amp;lt;anon.b26f45dd7d0ea1d60480ae6c3c88753d.34.llvm.65588711349491208+0x500&amp;gt;
+               vpbroadcastq 0x1d5b29(%rip),%ymm4        # 22d8b8 &amp;lt;anon.b26f45dd7d0ea1d60480ae6c3c88753d.34.llvm.65588711349491208+0x508&amp;gt;
+               vpbroadcastq 0x1d5b28(%rip),%ymm5        # 22d8c0 &amp;lt;anon.b26f45dd7d0ea1d60480ae6c3c88753d.34.llvm.65588711349491208+0x510&amp;gt;
+               vpbroadcastq 0x1d5b27(%rip),%ymm6        # 22d8c8 &amp;lt;anon.b26f45dd7d0ea1d60480ae6c3c88753d.34.llvm.65588711349491208+0x518&amp;gt;
+               vpbroadcastq 0x1d5b26(%rip),%ymm7        # 22d8d0 &amp;lt;anon.b26f45dd7d0ea1d60480ae6c3c88753d.34.llvm.65588711349491208+0x520&amp;gt;
+               vpbroadcastq 0x1d5b25(%rip),%ymm8        # 22d8d8 &amp;lt;anon.b26f45dd7d0ea1d60480ae6c3c88753d.34.llvm.65588711349491208+0x528&amp;gt;
+               vpbroadcastq 0x1d5b24(%rip),%ymm9        # 22d8e0 &amp;lt;anon.b26f45dd7d0ea1d60480ae6c3c88753d.34.llvm.65588711349491208+0x530&amp;gt;
+               vpbroadcastq 0x1d5b23(%rip),%ymm10        # 22d8e8 &amp;lt;anon.b26f45dd7d0ea1d60480ae6c3c88753d.34.llvm.65588711349491208+0x538&amp;gt;
+               vpxor        %xmm12,%xmm12,%xmm12
+               vpxor        %xmm13,%xmm13,%xmm13
+               vpxor        %xmm14,%xmm14,%xmm14
+               data16       data16 cs nopw 0x0(%rax,%rax,1)
+  1,34   90:   vpand        %ymm4,%ymm0,%ymm15
+  3,66         vpcmpeqq     %ymm5,%ymm15,%ymm1
+  3,04         vpandn       %ymm15,%ymm1,%ymm1
+  0,96         vpaddq       (%rsp),%ymm0,%ymm15
+  1,25         vpand        %ymm4,%ymm15,%ymm15
+  3,51         vpaddq       %ymm1,%ymm11,%ymm1
+  2,94         vpcmpeqq     %ymm5,%ymm15,%ymm11
+  2,25         vpandn       %ymm15,%ymm11,%ymm11
+  0,80         vpaddq       %ymm2,%ymm0,%ymm15
+  3,11         vpand        %ymm4,%ymm15,%ymm15
+  3,38         vpaddq       %ymm12,%ymm11,%ymm12
+  2,45         vpcmpeqq     %ymm5,%ymm15,%ymm11
+  1,73         vpandn       %ymm15,%ymm11,%ymm11
+  1,92         vpaddq       %ymm3,%ymm0,%ymm15
+  2,93         vpand        %ymm4,%ymm15,%ymm15
+  4,20         vpaddq       %ymm13,%ymm11,%ymm13
+  1,64         vpcmpeqq     %ymm5,%ymm15,%ymm11
+  2,02         vpandn       %ymm15,%ymm11,%ymm11
+  4,99         vpaddq       %ymm14,%ymm11,%ymm14
+  2,13         vpaddq       %ymm6,%ymm0,%ymm11
+  0,66         vpand        %ymm4,%ymm11,%ymm11
+  1,97         vpcmpeqq     %ymm5,%ymm11,%ymm15
+  4,79         vpandn       %ymm11,%ymm15,%ymm11
+  1,72         vpaddq       %ymm7,%ymm0,%ymm15
+  0,67         vpand        %ymm4,%ymm15,%ymm15
+  2,54         vpaddq       %ymm1,%ymm11,%ymm11
+  3,66         vpcmpeqq     %ymm5,%ymm15,%ymm1
+  2,39         vpandn       %ymm15,%ymm1,%ymm1
+  0,42         vpaddq       %ymm0,%ymm8,%ymm15
+  2,02         vpand        %ymm4,%ymm15,%ymm15
+  4,75         vpaddq       %ymm1,%ymm12,%ymm12
+  2,23         vpcmpeqq     %ymm5,%ymm15,%ymm1
+  1,99         vpandn       %ymm15,%ymm1,%ymm1
+  1,44         vpaddq       %ymm0,%ymm9,%ymm15
+  3,94         vpand        %ymm4,%ymm15,%ymm15
+  4,01         vpaddq       %ymm1,%ymm13,%ymm13
+  1,84         vpcmpeqq     %ymm5,%ymm15,%ymm1
+  1,90         vpandn       %ymm15,%ymm1,%ymm1
+  3,97         vpaddq       %ymm1,%ymm14,%ymm14
+  1,96         vpaddq       %ymm0,%ymm10,%ymm0
+  0,00         add          $0xffffffffffffffe0,%rax
+  0,84       ↑ jne          90
+  0,00         vpaddq       %ymm11,%ymm12,%ymm0
+  0,00         vpaddq       %ymm0,%ymm13,%ymm0
+               vpaddq       %ymm0,%ymm14,%ymm0
+               vextracti128 $0x1,%ymm0,%xmm1
+               vpaddq       %xmm1,%xmm0,%xmm0
+               vpshufd      $0xee,%xmm0,%xmm1
+  0,00         vpaddq       %xmm1,%xmm0,%xmm0
+               vmovq        %xmm0,%rax
+               add          $0x38,%rsp
+               vzeroupper     
+  0,00       ← ret            
+
+&lt;/pre&gt;
+
+&lt;p&gt;The loop got nicely vectorised and there are no branches inside the body of the loop either.
+It is a bit longer, but it does more per each cycle of the loop and needs fewer cycles.&lt;/p&gt;
+
+&lt;h1 id=&quot;conclusions&quot;&gt;Conclusions&lt;/h1&gt;
+&lt;ul&gt;
+  &lt;li&gt;Using &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional&lt;/code&gt; values in an extremely performance sensitive Java code is likely a bad idea. All JVMs tested here failed to optimize them out.&lt;/li&gt;
+  &lt;li&gt;Wrapping primitives in &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional&lt;/code&gt; caused up to 8x speed degradation and increased allocation rate significantly. Escape analysis optimization failed.&lt;/li&gt;
+  &lt;li&gt;Avoid boxing numbers and nulls in Java as well. More recent JVMs seem to cope with them better, but none managed to get rid of the overhead totally.&lt;/li&gt;
+  &lt;li&gt;The most ugly and error-prone solution turned out to be the fastest: primitive types and magic values.&lt;/li&gt;
+  &lt;li&gt;Don’t count on JVM taking advantage of knowing the target CPU and utilizing modern instruction sets like AVX automatically. 
+Actually even the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;sumSimple&lt;/code&gt; hasn’t been vectorized here, despite being a textbook case for vectorization.&lt;/li&gt;
+  &lt;li&gt;Knowing the actual performance profile of the program didn’t give JVM any edge here either.&lt;/li&gt;
+  &lt;li&gt;Fortunately, the advice above does not apply to Rust. Rust &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Option&lt;/code&gt; is zero-cost in most cases and, even without inlining, the added cost is tiny. 
+You don’t have to trade code readability nor safety to gain speed.&lt;/li&gt;
+  &lt;li&gt;Rust code returning &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Option&lt;/code&gt; optimized for my CPU was over &lt;strong&gt;30x&lt;/strong&gt; faster than Java code returning &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Optional&lt;/code&gt;, 
+and still over &lt;strong&gt;10x&lt;/strong&gt; faster if compiled in a portable way with default settings and no vectorization.&lt;/li&gt;
+  &lt;li&gt;Quite surprisingly, even the pessimized version of Rust code forced to allocate the &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Option&lt;/code&gt; on heap with no inlining was still faster than JVM doing the same. 
+Is manual heap allocation not really slower than GC-based allocation? Probably a topic for another blog post.&lt;/li&gt;
+  &lt;li&gt;Languages and their compilers vastly differ in optimization strength. Don’t assume all languages that can compile to machine code are the same.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;Disclaimer: Do measure performance by yourself and don’t assume particular optimizations will / won’t take place because you saw someone mentioning them in the blog post.
+YMMV.&lt;/p&gt;</content><author><name>Piotr Kołaczkowski</name></author><category term="performance," /><category term="optimization," /><category term="Java," /><category term="Rust" /><summary type="html">Some programming languages like Java or Scala offer more than one way to express a concept of “lack of value”. Traditionally, a special null value is used to denote references that don’t reference any value at all. However, over time we have learned that using nulls can be very error-prone and can cause many troubles like NullPointerException errors crashing a program in the most unexpected moment. Therefore, modern programming style recommends avoiding nulls wherever possible in favor of a much better Option, Optional or Maybe data type (called differently in many languages, but the concept is the same). Unfortunately, it is believed that optional values in Java may come with a performance penalty. In this blog post, I’ll try to answer whether it is true, and if the performance penalty really exists, how serious it is.</summary></entry><entry><title type="html">Ordering Requests to Accelerate Disk I/O</title><link href="/disk-access-ordering/" rel="alternate" type="text/html" title="Ordering Requests to Accelerate Disk I/O" /><published>2021-04-04T00:00:00+02:00</published><updated>2021-04-04T00:00:00+02:00</updated><id>/disk-access-ordering</id><content type="html" xml:base="/disk-access-ordering/">&lt;p&gt;In &lt;a href=&quot;/disk-parallelism/&quot;&gt;the earlier post&lt;/a&gt; I showed how accessing data on
 an SSD in parallel can greatly improve read performance. However, that technique
 is not very effective for data stored on spinning drives. In some cases parallel access
 can even deteriorate performance significantly. Fortunately, there exists a class of optimizations
