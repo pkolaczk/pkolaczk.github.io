@@ -278,16 +278,17 @@ pub fn sum_optional_non_zero() -> u64 {
 }
 
 
-fn get_int_boxed(n: u64) -> Box<u64> {
-    Box::new(n & 0xFF)
+fn get_int_boxed(n: u64) -> Box<Option<u64>> {
+    let opt = if n == MAGIC { None } else { Some(n) };
+    Box::new(opt)
 }
 
 pub fn sum_boxed() -> u64 {
     let mut sum = 0;
     for i in 0..1_000_000 {
         let n = get_int_boxed(i);
-        if *n != MAGIC {
-            sum += *n;
+        if let Some(k) = *n {
+            sum += k;
         }
     }
     sum
@@ -312,7 +313,7 @@ With default release options:
 sum_simple              time:   [375.58 us 377.02 us 378.73 us]                        
 sum_optional            time:   [373.19 us 374.20 us 375.31 us]                         
 sum_optional_non_zero   time:   [373.09 us 374.24 us 375.60 us]                                  
-sum_boxed               time:   [374.15 us 376.07 us 378.38 us]                      
+sum_boxed               time:   [313.62 us 314.76 us 316.09 us]                      
 </pre>
 
 With default release options, but with inlining of the inner functions 
@@ -321,7 +322,7 @@ returning the number blocked by `#[inline(never)]`:
 sum_simple              time:   [1.3899 ms 1.3940 ms 1.3987 ms]                         
 sum_optional            time:   [1.4066 ms 1.4117 ms 1.4177 ms]                          
 sum_optional_non_zero   time:   [1.1041 ms 1.1089 ms 1.1145 ms]                                   
-sum_boxed               time:   [14.572 ms 14.629 ms 14.692 ms]     
+sum_boxed               time:   [14.882 ms 14.936 ms 14.994 ms]                      
 </pre>
 
 
