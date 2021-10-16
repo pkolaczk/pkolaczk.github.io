@@ -211,7 +211,7 @@ OptionBenchmark.sumOptional  avgt    5  17961,942 ±  773,224  us/op
 </pre>
 
 Everything got much slower, but optionals and boxing overhead are still clearly visible and the ratio
-is still more than 7x. Rhe difference between JDKs is much smaller this time. 
+is still more than 7x. The difference between JDKs is much smaller this time. 
 
 # Rust Benchmark
 
