@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+  <title>How a Single Line of Code Made a 24-core Server Slower Than a Laptop | Piotr Kołaczkowski</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Imagine you wrote a program for a pleasingly parallel problem, where each thread does its own independent piece of work, and the threads don’t need to coordi...">
+  <meta name="author" content="Piotr Kołaczkowski">
+  <meta name="generator" content="Jekyll v4.1.1">
+  <!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-PBJQD2M');</script>
+<!-- End Google Tag Manager -->
+
+  <link rel="canonical" href="http://localhost:4000/server-slower-than-a-laptop/">
+  
+  <link rel="stylesheet" href="/assets/css/index.css">
+  
+  <link rel="stylesheet" href="/assets/css/classes.css">
+  <link rel="stylesheet" href="/assets/css/sidebar.css" media="screen and (min-width: 70em)">
+  <link rel="alternate" href="/feed.xml" type="application/atom+xml" title="Piotr Kołaczkowski">
+  
+  
+  <script defer src="/assets/node_modules/chart.js/dist/Chart.min.js"></script>
+</head>
+<body>
+  <!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-PBJQD2M"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
+  <header class="icons">
+    
+      <a href="/" class="title">Piotr Kołaczkowski</a>
+    
+    
+      
+  <nav>
+  <a aria-label="Home" href="/" ><svg aria-hidden="true" class="hidden"><use xlink:href="/assets/fontawesome/icons.svg#home"></use></svg><span aria-hidden="true" >Home</span></a>
+  <a aria-label="About" href="/about/" ><svg aria-hidden="true" class="hidden"><use xlink:href="/assets/fontawesome/icons.svg#address-card"></use></svg><span aria-hidden="true" >About</span></a>
+  
+  </nav>
+
+
+      
+  <nav>
+  <a aria-label="Mail" href="mailto:pkolaczk@gmail.com" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#envelope"></use></svg><span aria-hidden="true" class="hidden">Mail</span></a>
+  <a aria-label="Github" href="https://github.com/pkolaczk" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#github"></use></svg><span aria-hidden="true" class="hidden">Github</span></a>
+  <a aria-label="LinkedIn" href="https://www.linkedin.com/in/pkolaczk" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#linkedin"></use></svg><span aria-hidden="true" class="hidden">LinkedIn</span></a>
+  <a aria-label="RSS" href="/feed.xml" ><svg aria-hidden="true" ><use xlink:href="/assets/fontawesome/icons.svg#rss"></use></svg><span aria-hidden="true" class="hidden">RSS</span></a>
+  
+  </nav>
+
+
+    
+    
+      <div class="hidden description">Blog on programming, optimization and performance analysis</div>
+    
+
+  </header>
+
+  <article>
+  <header>
+  
+  <h1><a href="/server-slower-than-a-laptop/">How a Single Line of Code Made a 24-core Server Slower Than a Laptop</a></h1><time datetime="2021-12-31T00:00:00+01:00">December 31, 2021</time>
+</header>
+
+  <script type="text/javascript" src="/assets/graphs/graphs.js"></script>
+
+<p>Imagine you wrote a program for a pleasingly parallel problem,
+where each thread does its own independent piece of work, 
+and the threads don’t need to coordinate except joining the results at the end. 
+Obviously you’d expect the more cores it runs on, the faster it is. 
+You benchmark it on a laptop first and indeed you find out it scales 
+nearly perfectly on all of the 4 available cores. Then you run it on a big, fancy, multiprocessor
+machine, expecting even better performance, only to see it actually runs slower<br />
+than the laptop, no matter how many cores you give it. Uh. That has just happened to me recently.</p>
+
+<!--more-->
+<p>I’ve been working recently on a Cassandra benchmarking tool <a href="https://github.com/pkolaczk/latte">Latte</a> 
+which is probably the most efficient Cassandra benchmarking tool you can get, both in terms of CPU use and memory use.
+The whole idea is very simple: a small piece of code generates data and executes a bunch of 
+asynchronous CQL statements against Cassandra. 
+Latte calls that code in a loop and records how long each iteration took. 
+Finally, it makes a statistical analysis and displays it in various forms.</p>
+
+<p>Benchmarking seems to be a very pleasant problem to parallelize. 
+As long as the code under benchmark is stateless, it can be fairly trivially called
+from multiple threads. I’ve blogged about how to achieve that in Rust 
+already <a href="/benchmarking-cassandra/">here</a> and 
+<a href="/benchmarking-cassandra-with-rust-streams/">here</a>.</p>
+
+<p>However, at the time I wrote those earlier blog posts, Latte’s workload definition capabilities were <del>nonexistent</del> quite limited.
+It came with only two predefined, hardcoded workloads, one for reading and another one for writing. 
+There were a few things you could parameterize, e.g. the number or the sizes of table columns, but nothing really fancy.
+No secondary indexes. No custom filtering clauses. No control over the CQL text. Really nothing. 
+So, overall, Latte at that time was more of a proof-of-concept rather than a universal tool for doing real work.
+Surely, you could fork it and write a new workload in Rust, then compile everything from source. But who wants to waste time 
+on learning <em>the internals</em> of a niche benchmarking tool?</p>
+
+<h2 id="rune-scripting">Rune scripting</h2>
+<p>So the last year, in order to be able to measure the performance of storage attached indexes in Cassandra, 
+I decided to integrate Latte with a scripting engine that would allow me to easily define workloads without recompiling
+the whole program. After playing a bit with embedding CQL statements in TOML config files (which turned out to be both messy and limited at the same time), 
+through having some fun with embedding Lua (which is probably great in C world, but didn’t play so nice with Rust as I expected, although it kinda worked), 
+I eventually ended up with a design similar to that of <a href="https://github.com/akopytov/sysbench">sysbench</a> but 
+with an embedded <a href="https://rune-rs.github.io/">Rune</a> interpreter instead of Lua.</p>
+
+<p>The main selling points of Rune that convinced me were painless Rust integration and support for async code. 
+Thanks to async support, the user can execute CQL statements directly in the workload scripts, leveraging the asynchronous nature
+of the Cassandra driver. Additionally, the Rune team is amazingly helpful and removed anything that blocked me in virtually no time.</p>
+
+<p>Here is an example of a complete workload that measures performance of selecting rows by random keys:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">const</span> <span class="n">ROW_COUNT</span> <span class="o">=</span> <span class="nn">latte</span><span class="p">::</span><span class="nd">param!</span><span class="p">(</span><span class="s">"rows"</span><span class="p">,</span> <span class="mi">100000</span><span class="p">);</span>
+
+<span class="k">const</span> <span class="n">KEYSPACE</span> <span class="o">=</span> <span class="s">"latte"</span><span class="p">;</span>
+<span class="k">const</span> <span class="n">TABLE</span> <span class="o">=</span> <span class="s">"basic"</span><span class="p">;</span>
+
+<span class="k">pub</span> <span class="k">async</span> <span class="k">fn</span> <span class="nf">schema</span><span class="p">(</span><span class="n">ctx</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">ctx</span><span class="nf">.execute</span><span class="p">(</span><span class="err">`</span><span class="n">CREATE</span> <span class="n">KEYSPACE</span> <span class="n">IF</span> <span class="n">NOT</span> <span class="n">EXISTS</span> <span class="err">$</span><span class="p">{</span><span class="n">KEYSPACE</span><span class="p">}</span> <span class="err">\</span>
+                    <span class="n">WITH</span> <span class="n">REPLICATION</span> <span class="o">=</span> <span class="p">{</span> <span class="nv">'class</span><span class="err">'</span> <span class="p">:</span> <span class="nv">'SimpleStrategy</span><span class="err">'</span><span class="p">,</span> <span class="nv">'replication_factor</span><span class="err">'</span> <span class="p">:</span> <span class="mi">1</span> <span class="p">}</span><span class="err">`</span><span class="p">)</span><span class="k">.await</span><span class="o">?</span><span class="p">;</span>
+    <span class="n">ctx</span><span class="nf">.execute</span><span class="p">(</span><span class="err">`</span><span class="n">CREATE</span> <span class="n">TABLE</span> <span class="n">IF</span> <span class="n">NOT</span> <span class="n">EXISTS</span> <span class="err">$</span><span class="p">{</span><span class="n">KEYSPACE</span><span class="p">}</span><span class="err">.$</span><span class="p">{</span><span class="n">TABLE</span><span class="p">}(</span><span class="n">id</span> <span class="n">bigint</span> <span class="n">PRIMARY</span> <span class="n">KEY</span><span class="p">)</span><span class="err">`</span><span class="p">)</span><span class="k">.await</span><span class="o">?</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="k">pub</span> <span class="k">async</span> <span class="k">fn</span> <span class="nf">erase</span><span class="p">(</span><span class="n">ctx</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">ctx</span><span class="nf">.execute</span><span class="p">(</span><span class="err">`</span><span class="n">TRUNCATE</span> <span class="n">TABLE</span> <span class="err">$</span><span class="p">{</span><span class="n">KEYSPACE</span><span class="p">}</span><span class="err">.$</span><span class="p">{</span><span class="n">TABLE</span><span class="p">}</span><span class="err">`</span><span class="p">)</span><span class="k">.await</span><span class="o">?</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="k">pub</span> <span class="k">async</span> <span class="k">fn</span> <span class="nf">prepare</span><span class="p">(</span><span class="n">ctx</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">ctx</span><span class="py">.load_cycle_count</span> <span class="o">=</span> <span class="n">ROW_COUNT</span><span class="p">;</span>
+    <span class="n">ctx</span><span class="nf">.prepare</span><span class="p">(</span><span class="s">"insert"</span><span class="p">,</span> <span class="err">`</span><span class="n">INSERT</span> <span class="n">INTO</span> <span class="err">$</span><span class="p">{</span><span class="n">KEYSPACE</span><span class="p">}</span><span class="err">.$</span><span class="p">{</span><span class="n">TABLE</span><span class="p">}(</span><span class="n">id</span><span class="p">)</span> <span class="nf">VALUES</span> <span class="p">(:</span><span class="n">id</span><span class="p">)</span><span class="err">`</span><span class="p">)</span><span class="k">.await</span><span class="o">?</span><span class="p">;</span>
+    <span class="n">ctx</span><span class="nf">.prepare</span><span class="p">(</span><span class="s">"select"</span><span class="p">,</span> <span class="err">`</span><span class="n">SELECT</span> <span class="o">*</span> <span class="n">FROM</span> <span class="err">$</span><span class="p">{</span><span class="n">KEYSPACE</span><span class="p">}</span><span class="err">.$</span><span class="p">{</span><span class="n">TABLE</span><span class="p">}</span> <span class="n">WHERE</span> <span class="n">id</span> <span class="o">=</span> <span class="p">:</span><span class="n">id</span><span class="err">`</span><span class="p">)</span><span class="k">.await</span><span class="o">?</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="k">pub</span> <span class="k">async</span> <span class="k">fn</span> <span class="nf">load</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">ctx</span><span class="nf">.execute_prepared</span><span class="p">(</span><span class="s">"insert"</span><span class="p">,</span> <span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="k">.await</span><span class="o">?</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="k">pub</span> <span class="k">async</span> <span class="k">fn</span> <span class="nf">run</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">ctx</span><span class="nf">.execute_prepared</span><span class="p">(</span><span class="s">"select"</span><span class="p">,</span> <span class="p">[</span><span class="nn">latte</span><span class="p">::</span><span class="nf">hash</span><span class="p">(</span><span class="n">i</span><span class="p">)</span> <span class="o">%</span> <span class="n">ROW_COUNT</span><span class="p">])</span><span class="k">.await</span><span class="o">?</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>You can find more info on how to write those scripts in the <a href="https://github.com/pkolaczk/latte/#readme">README</a>.</p>
+
+<h2 id="benchmarking-the-benchmarking-program">Benchmarking the benchmarking program</h2>
+<p>Although the scripts are not JIT-compiled to native code yet, they are acceptably fast, and thanks to the limited amount of code they 
+typically contain, they don’t show up at the top of the profile. I’ve empirically found that the overhead of Rust-Rune FFI was lower than that of 
+Rust-Lua provided by <a href="https://crates.io/crates/mlua/">mlua</a>, probably due to the safety checks employed by mlua.</p>
+
+<p>Initially, to assess the performance of the benchmarking loop, I created an empty script:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">pub</span> <span class="k">async</span> <span class="k">fn</span> <span class="nf">run</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span> <span class="p">{</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>Even though there is no function body there, the benchmarking program needs to do some work to actually run it:</p>
+<ul>
+  <li>schedule N parallel asynchronous invocations using <a href="https://docs.rs/futures/0.3.19/futures/stream/trait.StreamExt.html#method.buffer_unordered"><code class="language-plaintext highlighter-rouge">buffer_unordered</code></a></li>
+  <li>setup a fresh local state (e.g. stack) for the Rune VM</li>
+  <li>invoke the Rune function, passing the parameters from the Rust side</li>
+  <li>measure the time it took to complete each returned future</li>
+  <li>collect logs, update HDR histograms and compute other statistics</li>
+  <li>and run all of that on M threads using Tokio threaded scheduler</li>
+</ul>
+
+<p>The results on my old 4-core laptop with Intel Xeon E3-1505M v6 locked at 3 GHz looked very promising:</p>
+
+<div class="figure">
+    <div style="height:20em"><canvas id="orig-perf-laptop"></canvas></div>
+    <script>
+    makeBarChartDeferred("orig-perf-laptop", "throughput [Mop/s]", "threads",
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        {"throughput": [1.596817, 3.313762, 4.623016, 6.540220, 6.560180, 7.319449, 7.672276, 7.988835, 8.023773, 7.982255, 7.978040, 7.980927]});
+    </script>    
+</div>
+
+<p>Because there are 4 cores, the throughput increases linearly up to 4 threads. Then it increases slightly more 
+up to 8 threads, thanks to hyper-threading that squeezes a bit more performance out of each core. Obviously there is no
+performance improvement beyond 8 threads, because all CPU resources are saturated at this point.</p>
+
+<p>I was also satisfied with the absolute numbers I got. A few million of empty calls per second on a laptop sounds like
+the benchmarking loop is lightweight enough to not cause significant overhead in real measurements. A local Cassandra server
+launched on the same laptop can only do about 200k requests per second when fully loaded and that only if those requests are 
+stupidly simple and all the data fits in memory.</p>
+
+<p>By the way, after adding some real code for data generation in the body, but with no calls to the database, as expected 
+everything got proportionally slower, but not more than 2x slower, so it was still in a “millions ops per second” range.</p>
+
+<p>That was easy. I could have stopped here and announce victory. However, I was curious how fast it could go if tried on a bigger machine with more cores.</p>
+
+<h2 id="running-an-empty-loop-on-24-cores">Running an empty loop on 24 cores</h2>
+<p>A server with two Intel Xeon CPU E5-2650L v3 processors, each with 12 cores running at 1.8 GHz should be obviously a lot faster than an old 4-core laptop, shouldn’t it?
+Well, maybe with 1 thread it would be slower because of lower CPU frequency (3 GHz vs 1.8 GHz), but it should make up for that by having many more cores.</p>
+
+<p>Let the numbers speak for themselves:</p>
+
+<div class="figure">
+    <div style="height:28em"><canvas id="orig-perf-server"></canvas></div>
+    <script>
+    makeBarChartDeferred("orig-perf-server", "throughput [Mop/s]", "threads",
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 24, 36, 48, 96],
+        {"throughput": [1.325938, 1.915190, 1.963769, 1.751019, 1.611263, 1.495254, 1.452816, 1.519251, 1.420541, 1.463928, 1.342367, 1.330432, 1.416689, 1.518840, 1.672394, 1.964795, 2.011382]});
+    </script>    
+</div>
+
+<p>You’ll agree there is something wrong here. Two threads are better than one… and that’s basically it. 
+I couldn’t squeeze more throughput than about 2 million calls per second, 
+which was about 4x worse than the throughput I got on the laptop. 
+Either the server was a lemon or my program had a serious scalability issue.</p>
+
+<h2 id="investigation">Investigation</h2>
+<p>When you hit a performance problem, the most common way of investigating it is to run the code under profiler.
+In Rust, it is very easy to generate flamegraphs with <code class="language-plaintext highlighter-rouge">cargo flamegraph</code>. 
+Let’s compare the flamegraphs collected when running the benchmark with 1 thread vs 12 threads:</p>
+
+<p><img src="/assets/img/server-slower-than-a-laptop/flamegraph-t1.svg" alt="flamegraph 1 thread" class="img-responsive" /></p>
+
+<p><img src="/assets/img/server-slower-than-a-laptop/flamegraph-t12.svg" alt="flamegraph 12 threads" class="img-responsive" /></p>
+
+<p>I was expecting to find a single thing that was a bottleneck, e.g. a contended mutex or something similar, but to my surprise, there was nothing obvious there.
+There wasn’t even a single bottleneck! Rune’s <code class="language-plaintext highlighter-rouge">VM::run</code> code seemed to take about 1/3 of the time, but the rest was simply taken
+by polling futures and quite likely the culprit got inlined and disappeared from the profile.</p>
+
+<p>Anyway, because of <code class="language-plaintext highlighter-rouge">VM::run</code> and the path <code class="language-plaintext highlighter-rouge">rune::shared::assert_send::AssertSend</code> leading also to Rune, I decided to disable the code responsible for
+calling the Rune function, and I reran the experiment with just a loop running an empty future, albeit with timing and statistics code still enabled:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Executes a single iteration of a workload.</span>
+<span class="c1">// This should be idempotent –</span>
+<span class="c1">// the generated action should be a function of the iteration number.</span>
+<span class="c1">// Returns the end time of the query.</span>
+<span class="k">pub</span> <span class="k">async</span> <span class="k">fn</span> <span class="nf">run</span><span class="p">(</span><span class="o">&amp;</span><span class="k">self</span><span class="p">,</span> <span class="n">iteration</span><span class="p">:</span> <span class="nb">i64</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Result</span><span class="o">&lt;</span><span class="n">Instant</span><span class="p">,</span> <span class="n">LatteError</span><span class="o">&gt;</span> <span class="p">{</span>
+    <span class="k">let</span> <span class="n">start_time</span> <span class="o">=</span> <span class="nn">Instant</span><span class="p">::</span><span class="nf">now</span><span class="p">();</span>
+    <span class="k">let</span> <span class="n">session</span> <span class="o">=</span> <span class="nn">SessionRef</span><span class="p">::</span><span class="nf">new</span><span class="p">(</span><span class="o">&amp;</span><span class="k">self</span><span class="py">.session</span><span class="p">);</span>
+    <span class="c1">// let result = self</span>
+    <span class="c1">//     .program</span>
+    <span class="c1">//     .async_call(self.function, (session, iteration))</span>
+    <span class="c1">//     .await</span>
+    <span class="c1">//     .map(|_| ()); // erase Value, because Value is !Send</span>
+    <span class="k">let</span> <span class="n">end_time</span> <span class="o">=</span> <span class="nn">Instant</span><span class="p">::</span><span class="nf">now</span><span class="p">();</span>
+    <span class="k">let</span> <span class="k">mut</span> <span class="n">state</span> <span class="o">=</span> <span class="k">self</span><span class="py">.state</span><span class="nf">.try_lock</span><span class="p">()</span><span class="nf">.unwrap</span><span class="p">();</span>
+    <span class="n">state</span><span class="py">.fn_stats</span><span class="nf">.operation_completed</span><span class="p">(</span><span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span><span class="p">);</span>
+    <span class="c1">// ... </span>
+    <span class="nf">Ok</span><span class="p">(</span><span class="n">end_time</span><span class="p">)</span>   
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>That scaled fine to over 100M calls per second on 48 threads! 
+So the problem must be somewhere below the <code class="language-plaintext highlighter-rouge">Program::async_call</code> function:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Compiled workload program</span>
+<span class="k">pub</span> <span class="k">struct</span> <span class="n">Program</span> <span class="p">{</span>
+    <span class="n">sources</span><span class="p">:</span> <span class="n">Sources</span><span class="p">,</span>
+    <span class="n">context</span><span class="p">:</span> <span class="nb">Arc</span><span class="o">&lt;</span><span class="n">RuntimeContext</span><span class="o">&gt;</span><span class="p">,</span> 
+    <span class="n">unit</span><span class="p">:</span> <span class="nb">Arc</span><span class="o">&lt;</span><span class="n">Unit</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1">// Executes given async function with args.</span>
+<span class="c1">// If execution fails, emits diagnostic messages, e.g. stacktrace to standard error stream.</span>
+<span class="c1">// Also signals an error if the function execution succeeds, but the function returns</span>
+<span class="c1">// an error value.    </span>
+<span class="k">pub</span> <span class="k">async</span> <span class="k">fn</span> <span class="nf">async_call</span><span class="p">(</span>
+    <span class="o">&amp;</span><span class="k">self</span><span class="p">,</span>
+    <span class="n">fun</span><span class="p">:</span> <span class="n">FnRef</span><span class="p">,</span>
+    <span class="n">args</span><span class="p">:</span> <span class="k">impl</span> <span class="n">Args</span> <span class="o">+</span> <span class="nb">Send</span><span class="p">,</span>
+<span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Result</span><span class="o">&lt;</span><span class="n">Value</span><span class="p">,</span> <span class="n">LatteError</span><span class="o">&gt;</span> <span class="p">{</span>
+    <span class="k">let</span> <span class="n">handle_err</span> <span class="o">=</span> <span class="p">|</span><span class="n">e</span><span class="p">:</span> <span class="n">VmError</span><span class="p">|</span> <span class="p">{</span>
+        <span class="k">let</span> <span class="k">mut</span> <span class="n">out</span> <span class="o">=</span> <span class="nn">StandardStream</span><span class="p">::</span><span class="nf">stderr</span><span class="p">(</span><span class="nn">ColorChoice</span><span class="p">::</span><span class="n">Auto</span><span class="p">);</span>
+        <span class="k">let</span> <span class="n">_</span> <span class="o">=</span> <span class="n">e</span><span class="nf">.emit</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span> <span class="n">out</span><span class="p">,</span> <span class="o">&amp;</span><span class="k">self</span><span class="py">.sources</span><span class="p">);</span>
+        <span class="nn">LatteError</span><span class="p">::</span><span class="nf">ScriptExecError</span><span class="p">(</span><span class="n">fun</span><span class="py">.name</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span>
+    <span class="p">};</span>
+    <span class="k">let</span> <span class="n">execution</span> <span class="o">=</span> <span class="k">self</span><span class="nf">.vm</span><span class="p">()</span><span class="nf">.send_execute</span><span class="p">(</span><span class="n">fun</span><span class="py">.hash</span><span class="p">,</span> <span class="n">args</span><span class="p">)</span><span class="nf">.map_err</span><span class="p">(</span><span class="n">handle_err</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+    <span class="k">let</span> <span class="n">result</span> <span class="o">=</span> <span class="n">execution</span><span class="nf">.async_complete</span><span class="p">()</span><span class="k">.await</span><span class="nf">.map_err</span><span class="p">(</span><span class="n">handle_err</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+    <span class="k">self</span><span class="nf">.convert_error</span><span class="p">(</span><span class="n">fun</span><span class="py">.name</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// Initializes a fresh virtual machine needed to execute this program.</span>
+<span class="c1">// This is extremely lightweight.</span>
+<span class="k">fn</span> <span class="nf">vm</span><span class="p">(</span><span class="o">&amp;</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">Vm</span> <span class="p">{</span>
+    <span class="nn">Vm</span><span class="p">::</span><span class="nf">new</span><span class="p">(</span><span class="k">self</span><span class="py">.context</span><span class="nf">.clone</span><span class="p">(),</span> <span class="k">self</span><span class="py">.unit</span><span class="nf">.clone</span><span class="p">())</span>
+<span class="p">}</span>
+
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">async_call</code> function does a few things:</p>
+<ul>
+  <li>it prepares a fresh Rune VM – this is supposed to be a very lightweight operation that basically prepares a fresh stack; the VMs are <em>not</em> shared between calls nor threads so they can run totally independently</li>
+  <li>it invokes a function by passing its identifier and parameters</li>
+  <li>finally it receives the result and converts some errors; we can safely assume that in an empty benchmark this is a no-op</li>
+</ul>
+
+<p>My next idea was to just remove the <code class="language-plaintext highlighter-rouge">send_execute</code> and <code class="language-plaintext highlighter-rouge">async_complete</code> calls and leave just the VM preparation.
+So basically I wanted to benchmark that line:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nn">Vm</span><span class="p">::</span><span class="nf">new</span><span class="p">(</span><span class="k">self</span><span class="py">.context</span><span class="nf">.clone</span><span class="p">(),</span> <span class="k">self</span><span class="py">.unit</span><span class="nf">.clone</span><span class="p">())</span>
+</code></pre></div></div>
+
+<p>The code looks fairly innocent. No locks, no mutexes, no syscalls, no shared mutable data here. 
+There are some read-only structures <code class="language-plaintext highlighter-rouge">context</code> and <code class="language-plaintext highlighter-rouge">unit</code> shared behind an <code class="language-plaintext highlighter-rouge">Arc</code>, but read-only sharing
+shouldn’t be a problem.</p>
+
+<p><code class="language-plaintext highlighter-rouge">VM::new</code> is also trivial:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">impl</span> <span class="n">Vm</span> <span class="p">{</span>
+
+    <span class="c1">// Construct a new virtual machine.</span>
+    <span class="k">pub</span> <span class="k">const</span> <span class="k">fn</span> <span class="nf">new</span><span class="p">(</span><span class="n">context</span><span class="p">:</span> <span class="nb">Arc</span><span class="o">&lt;</span><span class="n">RuntimeContext</span><span class="o">&gt;</span><span class="p">,</span> <span class="n">unit</span><span class="p">:</span> <span class="nb">Arc</span><span class="o">&lt;</span><span class="n">Unit</span><span class="o">&gt;</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="k">Self</span> <span class="p">{</span>
+        <span class="k">Self</span><span class="p">::</span><span class="nf">with_stack</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">unit</span><span class="p">,</span> <span class="nn">Stack</span><span class="p">::</span><span class="nf">new</span><span class="p">())</span>
+    <span class="p">}</span>
+
+    <span class="c1">// Construct a new virtual machine with a custom stack.</span>
+    <span class="k">pub</span> <span class="k">const</span> <span class="k">fn</span> <span class="nf">with_stack</span><span class="p">(</span><span class="n">context</span><span class="p">:</span> <span class="nb">Arc</span><span class="o">&lt;</span><span class="n">RuntimeContext</span><span class="o">&gt;</span><span class="p">,</span> <span class="n">unit</span><span class="p">:</span> <span class="nb">Arc</span><span class="o">&lt;</span><span class="n">Unit</span><span class="o">&gt;</span><span class="p">,</span> <span class="n">stack</span><span class="p">:</span> <span class="n">Stack</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="k">Self</span> <span class="p">{</span>
+        <span class="k">Self</span> <span class="p">{</span>
+            <span class="n">context</span><span class="p">,</span>
+            <span class="n">unit</span><span class="p">,</span>
+            <span class="n">ip</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+            <span class="n">stack</span><span class="p">,</span>
+            <span class="n">call_frames</span><span class="p">:</span> <span class="nn">vec</span><span class="p">::</span><span class="nn">Vec</span><span class="p">::</span><span class="nf">new</span><span class="p">(),</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+</code></pre></div></div>
+
+<p>However, not matter how innocent the code looks, I like to double check my assumptions. 
+I ran that with different numbers of threads and, although it was now faster than before, 
+<em>it didn’t scale at all again</em> – it hit a throughput ceiling of about 4 million calls per second!</p>
+
+<h2 id="the-problem">The problem</h2>
+
+<p>Although at first it doesn’t look like there is any sharing of mutable <em>data</em> in the code above, actually 
+there is something slightly hidden that’s shared and mutated: the <code class="language-plaintext highlighter-rouge">Arc</code> reference counters themselves. 
+Those counters are shared between all the invocations, performed from many threads, and 
+they are the source of the congestion here.</p>
+
+<p>Some may argue that atomically increasing or decreasing a shared atomic counter shouldn’t be a problem because those
+are “lockless” operations. They even translate to single assembly instructions (e.g. <code class="language-plaintext highlighter-rouge">lock xadd</code>)! If something is a single assembly
+instruction, it is not slow, isn’t it? That reasoning is unfortunately flawed.</p>
+
+<p>The root of the problem is not really the computation, but the cost of maintaining the shared state.</p>
+
+<p>The amount of time required to read or write data is mostly influenced by how far the CPU core needs to reach out for the data.
+Here are the typical latencies for the Intel Haswell Xeon CPUs according to <a href="https://www.7-cpu.com/cpu/Haswell.html">this site</a>:</p>
+<ul>
+  <li>L1 cache: 4 cycles</li>
+  <li>L2 cache: 12 cycles</li>
+  <li>L3 cache: 43 cycles</li>
+  <li>RAM: 62 cycles + 100 ns</li>
+</ul>
+
+<p>L1 and L2 caches are typically local to a core (L2 may be shared by two cores). L3 cache is shared by all cores of a CPU.
+There is also a direct interconnect between L3 caches of different processors on the main board for managing L3 cache coherency, so L3 is 
+logically shared between all <em>processors</em>.</p>
+
+<p>As long as you don’t update the cache line and only read it from multiple threads, the line will be loaded by multiple cores 
+and marked as shared. It is likely that frequent accesses to such data would be served from L1 cache, which is very fast. Therefore sharing 
+read-only data is perfectly fine and scales well. Even using atomics for only reading will be plenty fast in that case.</p>
+
+<p>However, once we introduce updates to the shared cache line, things start to complicate. The x86-amd64 architecture has coherent data caches.
+This means basically that what you write on one core, you can read back on another one. It is not possible to store a cache line with conflicting data 
+in multiple cores. Once a thread decides to update a shared cache line, that line gets invalidated on all the other cores, so subsequent loads
+on those cores would have to fetch the data from at least L3. That is obviously a lot slower, and even slower if there 
+are more processors than one on the main board.</p>
+
+<p>The fact that our reference counters are atomic is an additional problem that makes things even more complex for the processor. 
+Although using atomic instructions is often referred to as “lockless programming”, this is slightly misleading – 
+in fact, atomic operations require some locking to happen at the hardware level. This locking is very fine-grained and cheap as long as there is no congestion,
+but as usual with locking, you may expect very poor performance if many things try to fight for the same lock at the same time. And it is of course
+much worse if those “things” are whole CPUs and not just single cores that are close to each other.</p>
+
+<h2 id="the-fix">The fix</h2>
+<p>The obvious fix is to avoid <em>sharing</em> the reference counters. Latte has a very simple, hierarchical lifecycle structure, 
+so all those <code class="language-plaintext highlighter-rouge">Arc</code> updates looked like an overkill to me and they could probably be replaced with simpler references and Rust lifetimes. 
+However, this is easier said than done. Unfortunately Rune requires the references to the <code class="language-plaintext highlighter-rouge">Unit</code> and <code class="language-plaintext highlighter-rouge">RuntimeContext</code>
+to be passed wrapped in <code class="language-plaintext highlighter-rouge">Arc</code> for managing the lifetime (in probably more complex scenarios) and it also uses some <code class="language-plaintext highlighter-rouge">Arc</code>-wrapped values internally as part of those
+structures. Rewriting Rune just for my tiny use case was out of the question.</p>
+
+<p>Therefore the <code class="language-plaintext highlighter-rouge">Arc</code> had to stay. Instead of using a single <code class="language-plaintext highlighter-rouge">Arc</code> value we can use one <code class="language-plaintext highlighter-rouge">Arc</code> per thread. 
+That requires also separating the <code class="language-plaintext highlighter-rouge">Unit</code> and <code class="language-plaintext highlighter-rouge">RuntimeContext</code> values, so each thread would get their own. 
+As a side effect, this guarantees there is no sharing at all, so even if Rune clones an <code class="language-plaintext highlighter-rouge">Arc</code> stored internally as a part of those values, that problem would be also fixed.
+The downside of this solution is higher memory use. Fortunately . Latte workload scripts are usually tiny, so higher memory use is likely not a big problem.</p>
+
+<p>To be able to use separate <code class="language-plaintext highlighter-rouge">Unit</code> and <code class="language-plaintext highlighter-rouge">RuntimeContext</code> I submitted <a href="https://github.com/rune-rs/rune/pull/371">a patch</a> to Rune to make them <code class="language-plaintext highlighter-rouge">Clone</code>.
+Then, on the Latte side, the whole fix was actually introducing a new function for “deep” cloning the <code class="language-plaintext highlighter-rouge">Program</code> struct and then making sure
+each thread gets its own copy:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    <span class="c1">// Makes a deep copy of context and unit.</span>
+    <span class="c1">// Calling this method instead of `clone` ensures that Rune runtime structures</span>
+    <span class="c1">// are separate and can be moved to different CPU cores efficiently without accidental</span>
+    <span class="c1">// sharing of Arc references.</span>
+    <span class="k">fn</span> <span class="nf">unshare</span><span class="p">(</span><span class="o">&amp;</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">Program</span> <span class="p">{</span>
+        <span class="n">Program</span> <span class="p">{</span>
+            <span class="n">sources</span><span class="p">:</span> <span class="k">self</span><span class="py">.sources</span><span class="nf">.clone</span><span class="p">(),</span>
+            <span class="n">context</span><span class="p">:</span> <span class="nn">Arc</span><span class="p">::</span><span class="nf">new</span><span class="p">(</span><span class="k">self</span><span class="py">.context</span><span class="nf">.as_ref</span><span class="p">()</span><span class="nf">.clone</span><span class="p">()),</span>   <span class="c1">// clones the value under Arc and wraps it in a new counter</span>
+            <span class="n">unit</span><span class="p">:</span> <span class="nn">Arc</span><span class="p">::</span><span class="nf">new</span><span class="p">(</span><span class="k">self</span><span class="py">.unit</span><span class="nf">.as_ref</span><span class="p">()</span><span class="nf">.clone</span><span class="p">()),</span>         <span class="c1">// clones the value under Arc and wraps it in a new counter</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+</code></pre></div></div>
+<p>BTW: The <code class="language-plaintext highlighter-rouge">sources</code> field is not used during the execution, except for emitting diagnostics, so it could be left shared.</p>
+
+<p>Note that the original line where I originally found the slowdown did not need any changes!</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nn">Vm</span><span class="p">::</span><span class="nf">new</span><span class="p">(</span><span class="k">self</span><span class="py">.context</span><span class="nf">.clone</span><span class="p">(),</span> <span class="k">self</span><span class="py">.unit</span><span class="nf">.clone</span><span class="p">())</span>
+</code></pre></div></div>
+
+<p>This is because <code class="language-plaintext highlighter-rouge">self.context</code> and <code class="language-plaintext highlighter-rouge">self.unit</code> are not shared between threads anymore.
+Atomic updates to non-shared counters are fortunately very fast.</p>
+
+<h2 id="final-results">Final results</h2>
+
+<p>Now the throughput scales linearly up to 24 threads, as expected:</p>
+
+<div class="figure">
+    <div style="height:40em"><canvas id="patched-perf-server"></canvas></div>
+    <script>
+    makeBarChartDeferred("patched-perf-server", "throughput [Mop/s]", "threads",
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 36, 48, 96],
+        {"throughput": [1.354843, 2.650137, 3.765986, 4.990307, 6.019777, 7.064436, 8.145090, 8.867020, 10.375281, 11.558317, 12.549360, 13.905626, 14.931279, 16.042679, 17.136669, 18.417760, 
+                        19.532883,  20.500464, 21.868790, 22.875926, 24.004263, 25.079142, 26.133108, 27.373602, 29.786954, 30.908860, 30.656631]});
+    </script>    
+</div>
+
+<h2 id="takeaways">Takeaways</h2>
+<ul>
+  <li>The cost of a shared <code class="language-plaintext highlighter-rouge">Arc</code> might be absurdly high on some hardware configurations if it is updated frequently on many threads.</li>
+  <li>Don’t assume that a single assembly instruction cannot become a performance problem.</li>
+  <li>Don’t assume that if something scales fine on a single-CPU computer, it would still scale on a multi-CPU computer.</li>
+</ul>
+
+
+  
+
+<style>
+#share-buttons { margin-top: 2em; }
+#share-buttons > a {   
+    display: inline-block;
+    vertical-align: baseline;
+}
+#share-buttons > a > svg { 
+    height: 1.2em; 
+    width: 1.2em; 
+    margin-left: .25em; 
+    margin-right: .25em; 
+    fill: gray; 
+    position: relative; 
+    top: .17em; 
+}
+#share-buttons > span { 
+    margin-right: .4em 
+}
+#share-buttons > a:hover {cursor: pointer;}
+#share-buttons > a.facebook:hover > svg {fill: #3B5998;}
+#share-buttons > a.twitter:hover > svg {fill: #55ACEE;}
+#share-buttons > a.linkedin:hover > svg {fill: #0077b5;}
+#share-buttons > a.pinterest:hover > svg {fill: #CB2027;}
+#share-buttons > a.mail:hover > svg {fill: #0077b5; }
+</style>
+
+<div id="share-buttons">
+    <span style="color: gray;">Share on:</span>
+    <a class="facebook" title="Share this on Facebook" href="http://www.facebook.com/share.php?u=http://localhost:4000/server-slower-than-a-laptop/" target="_blank"> 
+        <svg><use xlink:href="/assets/fontawesome/icons.svg#facebook"></use></svg>
+    </a>
+    <a class="twitter" title="Share this on Twitter" href="https://twitter.com/intent/tweet?text=http://localhost:4000/server-slower-than-a-laptop/" target="_blank">
+        <svg><use xlink:href="/assets/fontawesome/icons.svg#twitter"></use></svg>
+    </a>
+    <a class="linkedin" title="Share this on Linkedin" href="https://www.linkedin.com/shareArticle?mini=true&url=http://localhost:4000/server-slower-than-a-laptop/" target="_blank">
+        <svg><use xlink:href="/assets/fontawesome/icons.svg#linkedin"></use></svg>
+    </a>
+    <a class="mail" title="Share this through Email" href="mailto:?&body=http://localhost:4000/server-slower-than-a-laptop/">
+        <svg><use xlink:href="/assets/fontawesome/icons.svg#envelope"></use></svg>
+    </a>
+</div>
+
+  
+    <hr>
+    
+        
+      <div id="disqus_thread"></div>
+      <script src="/assets/disqus/disqusloader.js"></script>
+      <script>        
+        disqusLoader('#disqus_thread', { scriptUrl: "//pkolaczk.disqus.com/embed.js" });
+      </script> 
+    
+    <noscript>Please enable JavaScript to view comments.</noscript>
+  
+</article>
+
+
+  <footer class="related">
+    <div class="previous"><span>Previous Post</span><a href="/overhead-of-optional/">Overhead of Returning Optional Values in Java and Rust</a></div>
+    <div class="next"></div>
+  </footer>
+
+
+</body>
+</html>
