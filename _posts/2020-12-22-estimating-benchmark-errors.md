@@ -297,8 +297,8 @@ You will need a bit of experimentation to find out the best lag cut-off for your
 Additionally, a nice side-effect of limiting the number of autocovariance terms is reducing the asymptotic complexity.
 
 Another, more general method is multiplying autocovariance terms by diminishing weights less than 1, approaching zero when $$k$$ reaches a hard 
-limit. A list of various weighting schemes is given by {% cite Andrews1991 %}. You can also find a broader discussion about applying this formula
-in {% cite Okui2010 %}. 
+limit. A list of various weighting schemes is given by [[1]](#Andrews1991). You can also find a broader discussion about applying this formula
+in [[2]](#Okui2010). 
 
 # Code
 Putting it all together, we can write the following function for estimating error of the mean:
@@ -341,5 +341,6 @@ pub fn error_of_the_mean(v: &[f64]) -> f64 {
 ```
 
 # References
-{% bibliography --cited %}
+1. <a name="Andrews1991"></a> D. W. K. Andrews, “Heteroskedasticity and Autocorrelation Consistent Covariance Matrix Estimation,” Econometrica, vol. 59, no. 3, pp. 817–858, 1991.
+2. <a name="Okui2010"></a> R. Okui, “Asymptotically Unbiased Estimation Of Autocovariances And Autocorrelations With Long Panel Data,” Econometric Theory, vol. 26, no. 5, pp. 1263–1304, 2010.
 

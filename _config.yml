@@ -10,11 +10,7 @@ markdown: kramdown
 kramdown:
   math_engine: katex
 
-scholar:
-  style: /assets/bibliography/ieee.csl
-
 # Layout
-
 sidebar: true                # show a sidebar instead of the usual header
 show_excerpts: true          # show article excerpts on the home page
 show_related: true           # show the previous and next links after every post
@@ -22,7 +18,6 @@ show_description: true       # show the site description in the sidebar
 show_title: true             # always keep the site title visible
 
 # Styling
-
 dark_header: true            # always keep the header dark
 minimal: false               # use simpler style
 
@@ -40,12 +35,9 @@ external:                    # see http://fontawesome.com/icons
 comments:
   disqus: true
   disqus_shortname: pkolaczk        # see https://disqus.com/
-#  isso_domain: ""                  # see https://posativ.org/isso/
-
 
 
 plugins: 
   - jekyll-feed
-  - jekyll-scholar
   
 
