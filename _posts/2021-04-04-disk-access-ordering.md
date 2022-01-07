@@ -68,8 +68,7 @@ process all of them (e.g. search, backup or deduplicate)?
 
 # Basic Request Ordering 
 
-In {%cite Lunde2009 %}
-the authors presented some nice techniques of improving performance by sorting I/O requests before
+In [[1]](Lunde2009) the authors presented some nice techniques of improving performance by sorting I/O requests before
 sending them to the operating system for execution. I implemented them in `fclones` and the results are
 truly amazing! 
 
@@ -196,7 +195,9 @@ with the physical placement of data, and such ordering would still do some magic
 Please let me know in the comments if you tried this and how big improvements you've got.
 
 # References
-{% bibliography --cited %}
+1. C. Lunde, H. Espeland, H. Stensland, and P. Halvorsen, “Improving File Tree Traversal Performance by Scheduling I/O Operations in User space,” Dec. 2009, pp. 145–152, doi: 10.1109/PCCC.2009.5403829.
+
+
 
 
 
