@@ -25,6 +25,7 @@ minimal: false               # use simpler style
 navigation:
   - {file: "index.html", icon: home}
   - {file: "about.md", icon: address-card}
+  - {file: "software.md", icon: cube}
 
 external:                    # see http://fontawesome.com/icons
   - {title: Mail, icon: envelope, url: "mailto:pkolaczk@gmail.com"}
