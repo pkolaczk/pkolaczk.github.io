@@ -145,10 +145,15 @@ await Promise.all(tasks);
 ## Python
 And Python added async/await in 3.5, so we can write:
 ```python
+
+async def perform_task():
+    await asyncio.sleep(10)
+
+
 tasks = []
 
 for task_id in range(num_tasks):
-    task = asyncio.create_task(await asyncio.sleep(10))
+    task = asyncio.create_task(perform_task())
     tasks.append(task)
 
 await asyncio.gather(*tasks)
@@ -198,15 +203,15 @@ for themselves, let's first launch only one task.
     makeBarChartDeferred("tasks-1", "memory [MB]", "",
         ["Rust threads", "Rust tokio", "Rust async-std", "Go", "Java threads",
         "Java virtual threads", "C#", "Node.JS", "Python", "Elixir"],
-        {"memory": [2.5, 3.0, 3.0, 1.8, 38.2, 40.0, 131.1, 36.2, 27.6, 57.4]});
+        {"memory": [2.5, 3.0, 3.0, 1.8, 38.2, 40.1, 131.1, 36.2, 17.3, 57.4]});
     </script>
     <span class="caption"> Fig.1: Peak memory needed to launch one task</span>
 </div>
 
 We can see there are certainly two groups of programs.
 Go and Rust programs, compiled statically to native binaries, need very little memory.
-The other programs running on managed platforms or through interpreters consume way more memory.
-There is over an order of magnitude difference in memory consumption between those two groups.
+The other programs running on managed platforms or through interpreters consume more memory, although Python fares really well in this case.
+There is about an order of magnitude difference in memory consumption between those two groups.
 
 It is a surprise to me that .NET somehow has the worst footprint, but I guess
 this can be tuned with some settings maybe. Let me know in the comments if there are
@@ -222,7 +227,7 @@ any tricks. I haven't seen much difference between the debug and release modes.
     makeBarChartDeferred("tasks-10k", "memory [MB]", "",
         ["Rust threads", "Rust tokio", "Rust async-std", "Go", "Java threads",
         "Java virtual threads", "C#", "Node.JS", "Python", "Elixir"],
-        {"memory": [48.3, 4.6, 8.1, 28.6, 244.4, 78.5, 131.4, 53.7, 27.9, 99.4]});
+        {"memory": [48.3, 4.6, 8.1, 28.6, 244.4, 78.5, 131.4, 53.7, 40.0, 99.4]});
     </script>
     <span class="caption"> Fig.2: Peak memory needed to launch 10,000 tasks</span>
 </div>
@@ -237,11 +242,11 @@ much bigger difference in favor of Go. Hence, I conclude that at 10k concurrent 
 
 Go has also lost its tiny advantage it had over Rust async
 in the previous benchmark and now it consumes over 6x more memory than the best Rust program.
-Actually, it hasn't even won with Python (the difference between those two is very small, let's consider it a tie).
+It was also overtaken by Python.
 
-And the final surprise is that at 10k tasks the memory consumption for some of the runtimes
-didn't significantly go up from the idle memory use. This is e.g. true for C# and Python.
-Probably those managed runtimes just use preallocated memory. Or their idle memory use
+And the final surprise is that at 10k tasks the memory consumption of .NET
+didn't significantly go up from the idle memory use.
+Probably it just uses preallocated memory. Or its idle memory use
 is so high that 10k tasks is just too few to matter.
 
 ## 100k Tasks
@@ -249,17 +254,14 @@ I could not launch 100,000 threads on my system, so the threads benchmarks had t
 Probably this could be somehow tweaked byt changing system settings,
 but after trying for an hour I gave up. So at 100k tasks you probably don't want to use threads.
 
-Python also gave up with
-`TypeError: a coroutine was expected, got None` error.
-
 <div class="figure">
-    <div style="height:15.5em">
+    <div style="height:16em">
         <canvas id="tasks-100k"></canvas>
     </div>
     <script>
     makeBarChartDeferred("tasks-100k", "memory [MB]", "",
-        ["Rust tokio", "Rust async-std", "Go", "Java virtual threads", "C#", "Node.JS", "Elixir"],
-        {"memory": [23.7, 54.6, 269, 223, 130.9, 150.1, 445]});
+        ["Rust tokio", "Rust async-std", "Go", "Java virtual threads", "C#", "Node.JS", "Python", "Elixir"],
+        {"memory": [23.7, 54.6, 269, 223, 130.9, 150.1, 240.5, 445]});
     </script>
     <span class="caption"> Fig.3: Peak memory needed to launch 100,000 tasks</span>
 </div>
@@ -275,13 +277,13 @@ At 1 million tasks, Elixir gave up with `** (SystemLimitError) a system limit ha
 The others still stayed in the game, though.
 
 <div class="figure">
-    <div style="height:13em">
+    <div style="height:14em">
         <canvas id="tasks-1M"></canvas>
     </div>
     <script>
     makeBarChartDeferred("tasks-1M", "memory [MB]", "",
-        ["Rust tokio", "Rust async-std", "Go", "Java virtual threads", "C#", "Node.JS"],
-        {"memory": [213.6, 527.7, 2658, 1154, 461, 939]});
+        ["Rust tokio", "Rust async-std", "Go", "Java virtual threads", "C#", "Python", "Node.JS"],
+        {"memory": [213.6, 527.7, 2658, 1154, 461, 2232, 939]});
     </script>
     <span class="caption"> Fig.4: Peak memory needed to launch 1 million tasks</span>
 </div>
@@ -291,7 +293,7 @@ very competitive. It even managed to slightly beat one of the Rust runtimes!
 
 The distance between Go and others increased. Now Go loses over 12x to the winner. It also
 loses over 2x to Java, which contradicts the general perception of JVM
-being a memory hog and Go being lightweight.
+being a memory hog and Go being lightweight. 
 
 Rust `tokio` remained unbeatable. This isn't surprising after seeing how it did at 100k tasks.
 
