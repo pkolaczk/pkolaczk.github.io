@@ -133,11 +133,7 @@ const delay = util.promisify(setTimeout);
 const tasks = [];
 
 for (let i = 0; i < numTasks; i++) {
-    tasks.push(
-        (async () => {
-            await delay(10000);
-        })()
-    );
+    tasks.push(delay(10000);
 }
 
 await Promise.all(tasks);
@@ -227,7 +223,7 @@ any tricks. I haven't seen much difference between the debug and release modes.
     makeBarChartDeferred("tasks-10k", "memory [MB]", "",
         ["Rust threads", "Rust tokio", "Rust async-std", "Go", "Java threads",
         "Java virtual threads", "C#", "Node.JS", "Python", "Elixir"],
-        {"memory": [48.3, 4.6, 8.1, 28.6, 244.4, 78.5, 131.4, 53.7, 40.0, 99.4]});
+        {"memory": [48.3, 4.6, 8.1, 28.6, 244.4, 78.5, 131.4, 48.3, 40.0, 99.4]});
     </script>
     <span class="caption"> Fig.2: Peak memory needed to launch 10,000 tasks</span>
 </div>
@@ -261,7 +257,7 @@ but after trying for an hour I gave up. So at 100k tasks you probably don't want
     <script>
     makeBarChartDeferred("tasks-100k", "memory [MB]", "",
         ["Rust tokio", "Rust async-std", "Go", "Java virtual threads", "C#", "Node.JS", "Python", "Elixir"],
-        {"memory": [23.7, 54.6, 269, 223, 130.9, 150.1, 240.5, 445]});
+        {"memory": [23.7, 54.6, 269, 223, 130.9, 112.5, 240.5, 445]});
     </script>
     <span class="caption"> Fig.3: Peak memory needed to launch 100,000 tasks</span>
 </div>
@@ -283,7 +279,7 @@ The others still stayed in the game, though.
     <script>
     makeBarChartDeferred("tasks-1M", "memory [MB]", "",
         ["Rust tokio", "Rust async-std", "Go", "Java virtual threads", "C#", "Python", "Node.JS"],
-        {"memory": [213.6, 527.7, 2658, 1154, 461, 2232, 939]});
+        {"memory": [213.6, 527.7, 2658, 1154, 461, 2232, 494]});
     </script>
     <span class="caption"> Fig.4: Peak memory needed to launch 1 million tasks</span>
 </div>
@@ -293,7 +289,7 @@ very competitive. It even managed to slightly beat one of the Rust runtimes!
 
 The distance between Go and others increased. Now Go loses over 12x to the winner. It also
 loses over 2x to Java, which contradicts the general perception of JVM
-being a memory hog and Go being lightweight. 
+being a memory hog and Go being lightweight.
 
 Rust `tokio` remained unbeatable. This isn't surprising after seeing how it did at 100k tasks.
 
