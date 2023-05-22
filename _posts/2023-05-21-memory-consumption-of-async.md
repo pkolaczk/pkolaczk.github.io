@@ -278,8 +278,8 @@ The others still stayed in the game, though.
     </div>
     <script>
     makeBarChartDeferred("tasks-1M", "memory [MB]", "",
-        ["Rust tokio", "Rust async-std", "Go", "Java virtual threads", "C#", "Python", "Node.JS"],
-        {"memory": [213.6, 527.7, 2658, 1154, 461, 2232, 494]});
+        ["Rust tokio", "Rust async-std", "Go", "Java virtual threads", "C#", "Node.JS", "Python"],
+        {"memory": [213.6, 527.7, 2658, 1154, 461, 494, 2232]});
     </script>
     <span class="caption"> Fig.4: Peak memory needed to launch 1 million tasks</span>
 </div>
