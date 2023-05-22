@@ -270,16 +270,17 @@ And Linux .NET likely cheats because its memory use still didn't go up. ;) I had
 Let's go extreme now.
 
 At 1 million tasks, Elixir gave up with `** (SystemLimitError) a system limit has been reached`.
-The others still stayed in the game, though.
+Edit: Some commenters pointed out I could increase the process limit. After adding
+ `--erl '+P 1000000'` parameter to `elixir` invocation, it ran fine.
 
 <div class="figure">
-    <div style="height:14em">
+    <div style="height:16em">
         <canvas id="tasks-1M"></canvas>
     </div>
     <script>
     makeBarChartDeferred("tasks-1M", "memory [MB]", "",
-        ["Rust tokio", "Rust async-std", "Go", "Java virtual threads", "C#", "Node.JS", "Python"],
-        {"memory": [213.6, 527.7, 2658, 1154, 461, 494, 2232]});
+        ["Rust tokio", "Rust async-std", "Go", "Java virtual threads", "C#", "Node.JS", "Python", "Elixir"],
+        {"memory": [213.6, 527.7, 2658, 1154, 461, 494, 2232, 4009]});
     </script>
     <span class="caption"> Fig.4: Peak memory needed to launch 1 million tasks</span>
 </div>
