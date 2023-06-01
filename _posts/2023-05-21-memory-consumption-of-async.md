@@ -238,7 +238,6 @@ much bigger difference in favor of Go. Hence, I conclude that at 10k concurrent 
 
 Go has also lost its tiny advantage it had over Rust async
 in the previous benchmark and now it consumes over 6x more memory than the best Rust program.
-It was also overtaken by Python.
 
 And the final surprise is that at 10k tasks the memory consumption of .NET
 didn't significantly go up from the idle memory use.
