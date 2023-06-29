@@ -133,7 +133,7 @@ const delay = util.promisify(setTimeout);
 const tasks = [];
 
 for (let i = 0; i < numTasks; i++) {
-    tasks.push(delay(10000);
+    tasks.push(delay(10000));
 }
 
 await Promise.all(tasks);
