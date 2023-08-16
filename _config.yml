@@ -1,6 +1,6 @@
-title: "Piotr Kołaczkowski"
-author: "Piotr Kołaczkowski"
-description: "Blog on programming, optimization and performance analysis"
+title: "Arnaud Wanet"
+author: "Arnaud Wanet"
+description: "Software engineering, distributed systems and artificial general intelligence"
 permalink: /:title/
 lang: "en"
 excerpt_separator: "\n\n\n"
@@ -28,9 +28,9 @@ navigation:
   - {file: "software.md", icon: cube}
 
 external:                    # see http://fontawesome.com/icons
-  - {title: Mail, icon: envelope, url: "mailto:pkolaczk@gmail.com"}
-  - {title: Github, icon: github, url: "https://github.com/pkolaczk"}
-  - {title: LinkedIn, icon: linkedin, url: "https://www.linkedin.com/in/pkolaczk"}
+  - {title: Mail, icon: envelope, url: "mailto:arnaudwanetwork9@gmail.com"}
+  - {title: Github, icon: github, url: "https://github.com/irononet"}
+  - {title: LinkedIn, icon: linkedin, url: "https://www.linkedin.com/in/arnaud-wanet-31a076a6/"}
   - {title: RSS, icon: rss, url: "/feed.xml"}
 
 comments:
